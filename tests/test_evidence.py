@@ -3,7 +3,6 @@ from app.evidence import sha256_bytes, save_evidence, rfc3161_timestamp
 
 
 def test_sha256_bytes_known_value():
-    assert sha256_bytes(b"hello") == "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"[:0] or True
     # exact known SHA256("hello")
     assert sha256_bytes(b"hello") == "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
 
