@@ -1,0 +1,69 @@
+PROJECT_CONTEXT.md: Webseiten- und Design-Monitor zur Erkennung von Dark Patterns
+1. Projekt-Überblick & Zielsetzung
+Dieses Projekt wird im Rahmen des Legal Loves Tech Hackathon 2026 für die Challenge der Verbraucherzentrale entwickelt. Ziel ist die Realisierung eines automatisierten Webseiten- und Design-Monitors, der digitale Oberflächen auf manipulative Gestaltung, täuschende Nutzerführung und rechtswidrige Dark Patterns untersucht.  
+
+Im Gegensatz zu reinen Browser-Erweiterungen ist das System als skalierbares Marktbeobachtungs- und Überwachungswerkzeug konzipiert. Es analysiert Schnittstellen systematisch, dokumentiert Veränderungen zeithistorisch, sichert Beweise gerichtsfest und bereitet die Funde rechtlich eingeordnet für juristische Prüfprozesse und Aufsichtsbehörden auf.  
+
+2. Rechtlicher Rahmen & Tatbestands-Mapping
+Das System muss festgestellte Gestaltungsmuster automatisch erfassen und den relevanten Rechtsnormen zuordnen:  
+
+UWG §§ 5, 5a; Anhang zu § 3 Abs. 3 (Irreführung & Schwarze Liste): Erkennung von irreführender Dringlichkeit (Fake Urgency), gefälschter Knappheit (Fake Scarcity), manipulativer sozialer Bewährtheit (Fake Social Proof) sowie versteckten Entgelten.  
+
+BGB § 312j Abs. 3, 4; EGBGB Art. 246a (Button-Lösung & Fernabsatz): Überprüfung der Transparenz kostenpflichtiger Vertragsschlüsse und Transparenz von Zusatzoptionen im Kaufprozess.  
+
+Digital Services Act (Art. 25 DSA): Verbot irreführender oder manipulativer Online-Schnittstellen (z. B. visuelle Asymmetrie von Buttons, erschwerte Kündigungs- und Opt-out-Pfade, Confirm Shaming).  
+
+DSGVO Art. 4 Nr. 11, Art. 7 Abs. 4 (Einwilligung & Kopplungsverbot): Analyse von Cookie-Bannern und Consent Management Platforms (CMPs) auf voreingestellte Häkchen (Pre-ticked Boxes), ungleiche Button-Kontraste und verdeckte Opt-out-Optionen.  
+
+Preisangabenverordnung (PAngV): Einhaltung von Preistransparenzgeboten und Erkennung nachträglicher Preisaufschläge vor Kaufabschluss.  
+
+3. Ist-Stand & Vorhandene Open-Source-Bausteine
+Das Projekt baut auf erprobten Open-Source-Konzepten und bestehenden Architekturen auf:  
+
+Crawler & Scraping-Fundament: Nutzung von Headless-Browsing-Mechanismen (z. B. Selenium ccrawler / OpenWPM) zur automatisierten Seitennavigation, Formularinteraktion und Speicherung struktureller Rohdaten.  
+
+Dynamic DOM State Snapshotting: Prinzip des zeitversetzten DOM-Vergleichs (z. B. aus Dapde), um skriptbasierte Veränderungen wie ablaufende Countdown-Timer zu erfassen.
+
+CMP- & Banner-Regelwerke: Nutzung von JSON-Selektoren und Display-Filterregeln (z. B. aus Consent-O-Matic) zur automatisierten Zuordnung von Cookie-Bannern und Auswahlpfaden.
+
+NLP- & LLM-Klassifikatoren: Einsatz vortrainierter Text-Klassifikatoren und LLM-Anbindungen (z. B. Google Gemini / Anthropic Claude) zur semantischen Erkennung von rhetorischem Druck und Confirm Shaming.  
+
+4. Zu entwickelnde Kernmodule (~50 % – 60 % Eigenleistung)
+Die Hauptaufgabe besteht in der Zusammenführung und Erweiterung dieser Einzelkomponenten zu einer produktionsreifen Gesamtarchitektur:
+
+Modul A: Automatisiertes Crawling & Task-Orchestrierung
+Entwickle eine zentrale Steuerung (z. B. Python mit Playwright oder Puppeteer), die Ziel-URLs ansteuert, Interaktionen ausführt (z. B. In-den-Warenkorb-Legen, Cookie-Banner öffnen) und DOM-Snapshots sowie Screenshots anfertigt.
+
+Verknüpfe eine datensparsame Erstprüfung (lokales Regex/DOM-Parsing) mit einer nachgelagerten API-Analyse für komplexe Fälle.  
+
+Modul B: Visuelle & Layout-Analyse (DSA Art. 25)
+Implementiere eine Extraktionslogik für Computed Styles (Schriftgrößen, Farbkontraste, Button-Abstände).
+
+Berechne Maße für visuelle Asymmetrie (z. B. Größen- und Kontrastverhältnisse zwischen „Akzeptieren“- und „Ablehnen“-Schaltflächen).  
+
+Modul C: Gerichtsfeste Beweissicherung & Historisierung
+Erstelle ein Protokollierungsmodul für zeithistorische Vergleiche (Veränderung von Oberflächen über Wochen/Monate).  
+
+Speichere Beweismittel ab: Kryptografisch zeitgestempelte Snapshots, HAR-Netzwerkdateien zur Dokumentation von Datenabflüssen sowie Screenshots/Bildsequenzen dynamischer UI-Elemente.
+
+Modul D: Compliance-Engine & PDF-Report-Generator
+Verknüpfe jeden Erkennungsfund mit der entsprechenden Rechtsnorm (UWG, BGB, DSA, DSGVO, PAngV).  
+
+Implementiere einen Generator zur Erstellung strukturierter Prüfberichte (PDF/JSON) für Juristen der Verbraucherzentralen und Verbände.  
+
+5. Vorgaben für die Implementierung
+Beachte bei der Generierung von Code und Architekturen folgende Richtlinien:
+
+Strikte Entkopplung: Trenne die Scraper/Crawler-Komponente, die Analyse-Engines, die Datenbankhaltung und das Berichtsmodul modular voneinander.  
+
+Robustheit vor Selektoren-Brüchigkeit: Setze vorrangig auf berechnete visuelle Eigenschaften (Computed Styles) und semantische Texteigenschaften statt auf hartcodierte CSS-Klassennamen.
+
+Einheitliche Datenstruktur: Jeder identifizierte Befund muss folgende Datenstruktur aufweisen:
+
+pattern_type: Typ des Dark Patterns (z. B. Fake Urgency, Confirm Shaming).  
+
+target_norm: Betroffene Rechtsnorm (z. B. Art. 25 DSA, § 5a UWG).  
+
+confidence_score: Errechneter Wahrscheinlichkeitswert (0.0 bis 1.0).  
+
+evidence_data: Pfade zu Screenshot, DOM-Auszug, HAR-Log und Zeitstempel.
