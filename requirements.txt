@@ -1,0 +1,13 @@
+fastapi
+uvicorn[standard]
+jinja2
+python-multipart
+playwright
+trafilatura
+beautifulsoup4
+anthropic
+rfc3161ng
+weasyprint
+httpx
+pytest
+pytest-asyncio

@@ -1,1 +1,6 @@
-.superpowers/
+.env
+__pycache__/
+*.pyc
+data/evidence/
+data/monitor.db
+.venv/
