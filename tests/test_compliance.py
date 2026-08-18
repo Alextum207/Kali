@@ -18,10 +18,17 @@ def test_map_unknown_pattern_returns_placeholder():
 @pytest.mark.asyncio
 async def test_fetch_citation_returns_text_on_success():
     def handler(request):
-        return httpx.Response(200, json={"text": "Art. 25 DSA Volltext..."})
+        # Real SearchResponse from legal-text-mcp-de HTTP API
+        return httpx.Response(200, json={
+            "query": "Art. 25 DSA",
+            "results": [
+                {"norm": {"text": "Art. 25 DSA Volltext..."}}
+            ],
+            "count": 1
+        })
     transport = httpx.MockTransport(handler)
-    async with httpx.AsyncClient(transport=transport, base_url="http://localhost:8091") as client:
-        text = await fetch_citation("Art. 25 DSA", "http://localhost:8091", client=client)
+    async with httpx.AsyncClient(transport=transport, base_url="http://localhost:8080") as client:
+        text = await fetch_citation("Art. 25 DSA", "http://localhost:8080", client=client)
     assert text == "Art. 25 DSA Volltext..."
 
 
@@ -30,6 +37,6 @@ async def test_fetch_citation_returns_none_on_connection_error():
     def handler(request):
         raise httpx.ConnectError("no server", request=request)
     transport = httpx.MockTransport(handler)
-    async with httpx.AsyncClient(transport=transport, base_url="http://localhost:8091") as client:
-        text = await fetch_citation("Art. 25 DSA", "http://localhost:8091", client=client)
+    async with httpx.AsyncClient(transport=transport, base_url="http://localhost:8080") as client:
+        text = await fetch_citation("Art. 25 DSA", "http://localhost:8080", client=client)
     assert text is None

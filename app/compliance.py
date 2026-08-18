@@ -22,10 +22,9 @@ def map_to_norm(pattern_type: str) -> str:
     return NORM_MAP.get(pattern_type, "Unbekannt")
 
 
-# Endpoint path is the assumed REST shape of legal-text-mcp-de's HTTP API
-# (mirrors the "legal://laws/{law}/norms/{id}" resource URI documented in the
-# repo). VERIFY against the running server's /docs (uvx legal-text-mcp-de
-# serve) and adjust this path if the OpenAPI schema differs.
+# Endpoint verified via OpenAPI schema: legal-text-mcp-de HTTP API
+# (uvx legal-text-mcp-de http on http://0.0.0.0:8080)
+# Endpoint: /search (query param, not q; SearchResponse with results array)
 NORM_LOOKUP_PATH = "/search"
 
 
@@ -39,9 +38,12 @@ async def fetch_citation(
     if owns_client:
         client = httpx.AsyncClient(base_url=base_url, timeout=5.0)
     try:
-        response = await client.get(NORM_LOOKUP_PATH, params={"q": norm})
+        response = await client.get(NORM_LOOKUP_PATH, params={"query": norm})
         response.raise_for_status()
-        return response.json().get("text")
+        # SearchResponse has { query, results: [...], count, codes }
+        # Each result has norm object with text field
+        results = response.json().get("results") or []
+        return results[0].get("norm", {}).get("text") if results else None
     except Exception as exc:  # noqa: BLE001 - deliberate broad catch, network call
         logger.warning("legal-text-mcp-de lookup failed for %r: %s", norm, exc)
         return None
