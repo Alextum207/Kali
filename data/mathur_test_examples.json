@@ -1,0 +1,5 @@
+[
+  {"html": "<html><body><main><p>Hurry! This deal ends in 10 minutes and won't come back.</p></main></body></html>", "expected_pattern_type": "Fake Urgency"},
+  {"html": "<html><body><main><p>No thanks, I don't want to protect my family with this insurance.</p></main></body></html>", "expected_pattern_type": "Confirm Shaming"},
+  {"html": "<html><body><form><input type='checkbox' id='marketing' checked></form></body></html>", "expected_pattern_type": "Pre-ticked Box"}
+]
