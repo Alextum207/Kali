@@ -27,7 +27,7 @@ async def test_run_scan_persists_findings_with_evidence(tmp_path, monkeypatch):
         assert har_dir == str(tmp_path)
         return _fake_crawl_result(har_dir)
 
-    def fake_run_analysis(dom_html, button_styles, llm_client=None):
+    async def fake_run_analysis(dom_html, button_styles, llm_client=None):
         return [
             {
                 "pattern_type": "Pre-ticked Box",
@@ -62,7 +62,7 @@ async def test_run_scan_citation_none_does_not_crash(tmp_path, monkeypatch):
     async def fake_crawl_page(url, browser, har_dir=None):
         return _fake_crawl_result(har_dir)
 
-    def fake_run_analysis(dom_html, button_styles, llm_client=None):
+    async def fake_run_analysis(dom_html, button_styles, llm_client=None):
         return [
             {
                 "pattern_type": "Pre-ticked Box",

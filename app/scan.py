@@ -23,7 +23,7 @@ async def run_scan(url: str, conn, evidence_dir: str, browser=None) -> int:
     with open(crawl_result["har_path"], "rb") as f:
         har_hash = sha256_bytes(f.read())
 
-    findings = run_analysis(crawl_result["dom_after"], crawl_result["button_styles"])
+    findings = await run_analysis(crawl_result["dom_after"], crawl_result["button_styles"])
 
     async with httpx.AsyncClient(base_url=LEGAL_TEXT_MCP_BASE_URL, timeout=5.0) as client:
         for finding in findings:
