@@ -131,6 +131,34 @@ async def apply_consent_rules(page, rules_dir: str = DEFAULT_CONSENT_RULES_DIR) 
         logger.warning("apply_consent_rules: best-effort pass failed: %s", exc)
 
 
+async def _snapshot_page(page) -> dict:
+    dom_before = await page.content()
+    await asyncio.sleep(1.5)  # Dapde principle: catch script-driven DOM changes
+    dom_after = await page.content()
+
+    screenshot = await page.screenshot()
+
+    button_styles = None
+    accept_style = await _read_style(page, "#accept")
+    reject_style = await _read_style(page, "#reject")
+    if accept_style and reject_style:
+        button_styles = {"accept": accept_style, "reject": reject_style}
+
+    try:
+        contrast_findings = await find_low_contrast_legal_text(page)
+    except Exception as exc:  # noqa: BLE001 - deliberate broad catch, page state can vary
+        logger.debug("_snapshot_page: find_low_contrast_legal_text failed: %s", exc)
+        contrast_findings = []
+
+    return {
+        "dom_before": dom_before,
+        "dom_after": dom_after,
+        "screenshot": screenshot,
+        "button_styles": button_styles,
+        "contrast_findings": contrast_findings,
+    }
+
+
 async def crawl_page(
     url: str,
     browser,
@@ -147,28 +175,12 @@ async def crawl_page(
 
     await apply_consent_rules(page, consent_rules_dir)
 
-    dom_before = await page.content()
-    await asyncio.sleep(1.5)  # Dapde principle: catch script-driven DOM changes
-    dom_after = await page.content()
-
-    screenshot = await page.screenshot()
-
-    button_styles = None
-    accept_style = await _read_style(page, "#accept")
-    reject_style = await _read_style(page, "#reject")
-    if accept_style and reject_style:
-        button_styles = {"accept": accept_style, "reject": reject_style}
+    snapshot = await _snapshot_page(page)
 
     await page.close()
     await context.close()  # flushes the HAR file to disk
 
-    return {
-        "dom_before": dom_before,
-        "dom_after": dom_after,
-        "screenshot": screenshot,
-        "har_path": har_path,
-        "button_styles": button_styles,
-    }
+    return {**snapshot, "har_path": har_path}
 
 
 async def find_low_contrast_legal_text(page) -> list[dict]:
