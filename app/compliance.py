@@ -16,6 +16,16 @@ NORM_MAP = {
     "Pre-ticked Box": "Art. 4 Nr. 11, Art. 7 Abs. 4 DSGVO",
     "Verdeckter Opt-out": "Art. 4 Nr. 11, Art. 7 Abs. 4 DSGVO",
     "Preisaufschlag": "PAngV",
+    "Trick Questions": "Art. 4 Nr. 11, Art. 7 Abs. 4 DSGVO",
+    "Forced Continuity": "§ 312j Abs. 3, 4 BGB; Art. 246a EGBGB",
+    "Decoy Pricing": "UWG §§ 5, 5a; Anhang zu § 3 Abs. 3",
+    "Nagging": "Art. 25 DSA",
+    "Roach Motel": "Art. 25 DSA",
+    "Forced Path": "Art. 25 DSA",
+    "Exploiting Addiction (Autoplay)": "Art. 25 DSA",
+    "Exploiting Addiction (Infinite Scroll)": "Art. 25 DSA",
+    "Verständnis-Barriere (Sprachkomplexität)": "UWG §§ 5, 5a; Anhang zu § 3 Abs. 3",
+    "Visuelle Tarnung (Kontrast)": "Art. 25 DSA",
 }
 
 

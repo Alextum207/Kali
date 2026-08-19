@@ -12,7 +12,8 @@ _EXAMPLES_PATH = Path(__file__).resolve().parents[2] / "data" / "mathur_examples
 SYSTEM_PROMPT = """Du bist ein Klassifikator für manipulative UX-Texte (Dark Patterns).
 Antworte AUSSCHLIESSLICH mit einem JSON-Array. Jedes Element hat die Felder
 "pattern_type" (einer aus: Fake Urgency, Fake Scarcity, Fake Social Proof,
-Confirm Shaming, Sneaking / Hidden Costs), "confidence_score" (0.0-1.0) und
+Confirm Shaming, Sneaking / Hidden Costs, Forced Continuity, Decoy Pricing,
+Nagging, Roach Motel, Forced Path), "confidence_score" (0.0-1.0) und
 "quote" (das wörtliche Zitat aus dem Text, das den Fund belegt). Gib ein
 leeres Array [] zurück, wenn der Text keine Dark Patterns enthält.
 

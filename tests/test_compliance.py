@@ -25,8 +25,27 @@ def test_llm_prompt_pattern_types_all_resolve_to_a_norm():
         "Fake Social Proof",
         "Confirm Shaming",
         "Sneaking / Hidden Costs",
+        "Forced Continuity",
+        "Decoy Pricing",
+        "Nagging",
+        "Roach Motel",
+        "Forced Path",
     ]
     for pattern_type in prompt_pattern_types:
+        assert map_to_norm(pattern_type) != "Unbekannt", pattern_type
+
+
+def test_map_heuristic_and_visual_pattern_types():
+    """Same contract, for the non-LLM pattern types produced by the DOM
+    heuristics, readability check, and generic contrast scan."""
+    heuristic_pattern_types = [
+        "Trick Questions",
+        "Exploiting Addiction (Autoplay)",
+        "Exploiting Addiction (Infinite Scroll)",
+        "Verständnis-Barriere (Sprachkomplexität)",
+        "Visuelle Tarnung (Kontrast)",
+    ]
+    for pattern_type in heuristic_pattern_types:
         assert map_to_norm(pattern_type) != "Unbekannt", pattern_type
 
 
