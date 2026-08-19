@@ -42,7 +42,7 @@ PAGE_CATEGORIES = (
 
 _CATEGORY_KEYWORDS = {
     "checkout_payment": ("checkout", "kasse", "warenkorb", "cart", "bestellung", "payment", "zahlung"),
-    "account_subscription": ("account", "konto", "abo", "subscription", "kündig", "cancel"),
+    "account_subscription": ("/account", "/konto", "subscription", "kündig", "cancel", "mein abo"),
     "product_category": ("product", "produkt", "/p/", "kategorie", "category"),
 }
 
@@ -67,8 +67,6 @@ def _llm_classify_category(url: str, dom_html: str, client) -> str:
 
 
 def classify_page_category(url: str, dom_html: str, llm_client=None) -> str:
-    import re
-
     haystack = url.lower()
     soup = BeautifulSoup(dom_html, "html.parser")
     heading = soup.find(["h1", "h2"])
@@ -76,13 +74,8 @@ def classify_page_category(url: str, dom_html: str, llm_client=None) -> str:
         haystack += " " + heading.get_text(strip=True).lower()
 
     for category, keywords in _CATEGORY_KEYWORDS.items():
-        for kw in keywords:
-            if kw.startswith("/"):
-                if kw in haystack:
-                    return category
-            else:
-                if re.search(r"\b" + re.escape(kw) + r"\b", haystack):
-                    return category
+        if any(kw in haystack for kw in keywords):
+            return category
 
     if llm_client is not None:
         try:
