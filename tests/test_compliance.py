@@ -15,6 +15,21 @@ def test_map_unknown_pattern_returns_placeholder():
     assert map_to_norm("Something Weird") == "Unbekannt"
 
 
+def test_llm_prompt_pattern_types_all_resolve_to_a_norm():
+    """Contract test: every pattern_type Claude is instructed to emit (per
+    llm_classify.SYSTEM_PROMPT's enum list) must resolve through map_to_norm.
+    Prevents drift between the prompt's vocabulary and NORM_MAP's keys."""
+    prompt_pattern_types = [
+        "Fake Urgency",
+        "Fake Scarcity",
+        "Fake Social Proof",
+        "Confirm Shaming",
+        "Sneaking / Hidden Costs",
+    ]
+    for pattern_type in prompt_pattern_types:
+        assert map_to_norm(pattern_type) != "Unbekannt", pattern_type
+
+
 @pytest.mark.asyncio
 async def test_fetch_citation_returns_text_on_success():
     def handler(request):
