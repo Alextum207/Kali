@@ -6,7 +6,7 @@ def test_start_scan_and_view_findings(tmp_path, monkeypatch):
     monkeypatch.setattr(main_module, "DB_PATH", str(tmp_path / "test.db"))
     monkeypatch.setattr(main_module, "EVIDENCE_DIR", str(tmp_path / "evidence"))
 
-    async def fake_run_scan(url, conn, evidence_dir, browser=None):
+    async def fake_run_site_scan(url, conn, evidence_dir, browser=None, max_pages=None, llm_client=None):
         from app.db import insert_scan, insert_finding
         scan_id = insert_scan(conn, url)
         insert_finding(conn, scan_id, {
@@ -17,7 +17,7 @@ def test_start_scan_and_view_findings(tmp_path, monkeypatch):
         })
         return scan_id
 
-    monkeypatch.setattr(main_module, "run_scan", fake_run_scan)
+    monkeypatch.setattr(main_module, "run_site_scan", fake_run_site_scan)
 
     with TestClient(main_module.app) as client:
         response = client.post("/scans", data={"url": "https://example.com"}, follow_redirects=False)
@@ -27,6 +27,26 @@ def test_start_scan_and_view_findings(tmp_path, monkeypatch):
         detail = client.get(scan_url)
         assert detail.status_code == 200
         assert "Confirm Shaming" in detail.text
+
+
+def test_start_scan_accepts_optional_max_pages_field(tmp_path, monkeypatch):
+    monkeypatch.setattr(main_module, "DB_PATH", str(tmp_path / "test.db"))
+    monkeypatch.setattr(main_module, "EVIDENCE_DIR", str(tmp_path / "evidence"))
+
+    received = {}
+
+    async def fake_run_site_scan(url, conn, evidence_dir, browser=None, max_pages=None, llm_client=None):
+        received["max_pages"] = max_pages
+        from app.db import insert_scan
+        return insert_scan(conn, url)
+
+    monkeypatch.setattr(main_module, "run_site_scan", fake_run_site_scan)
+
+    with TestClient(main_module.app) as client:
+        response = client.post("/scans", data={"url": "https://example.com", "max_pages": "3"}, follow_redirects=False)
+
+    assert response.status_code == 303
+    assert received["max_pages"] == 3
 
 
 def test_dashboard_renders():

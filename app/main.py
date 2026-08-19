@@ -8,7 +8,7 @@ from fastapi.templating import Jinja2Templates
 from playwright.async_api import async_playwright
 
 from app.db import init_db, get_scan, get_findings
-from app.scan import run_scan
+from app.scan import run_site_scan
 from app.url_safety import validate_scan_url
 
 DB_PATH = os.environ.get("DB_PATH", "./data/monitor.db")
@@ -57,14 +57,19 @@ def dashboard(request: Request):
 
 @app.post("/scans")
 async def start_scan(
-    request: Request, url: str = Form(...), conn: sqlite3.Connection = Depends(_get_conn)
+    request: Request,
+    url: str = Form(...),
+    max_pages: int | None = Form(None),
+    conn: sqlite3.Connection = Depends(_get_conn),
 ):
     try:
         validate_scan_url(url)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    scan_id = await run_scan(url, conn, EVIDENCE_DIR, browser=request.app.state.browser)
+    scan_id = await run_site_scan(
+        url, conn, EVIDENCE_DIR, browser=request.app.state.browser, max_pages=max_pages
+    )
     return RedirectResponse(url=f"/scans/{scan_id}", status_code=303)
 
 
