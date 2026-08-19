@@ -1,3 +1,4 @@
+import json
 import logging
 from urllib.parse import urljoin, urlparse
 
@@ -84,3 +85,51 @@ def classify_page_category(url: str, dom_html: str, llm_client=None) -> str:
             logger.warning("LLM category classification failed, using 'other': %s", exc)
 
     return "other"
+
+
+# One-line navigation goal per category; categories not listed here (or
+# mapped to None) get no LLM-driven interaction — cookie_consent is already
+# handled by apply_consent_rules, "other" has no specific journey to drive.
+_INTERACTION_GOALS = {
+    "checkout_payment": (
+        "Klicke dich bis zum letzten Schritt vor der Zahlung durch "
+        "(z.B. 'Weiter', 'Zur Kasse', 'Warenkorb ansehen'), aber löse "
+        "NIEMALS eine echte Zahlung aus."
+    ),
+    "account_subscription": (
+        "Suche einen Kündigungs- oder Konto-löschen-Link/Button und "
+        "klicke ihn an, aber bestätige die Kündigung NICHT endgültig."
+    ),
+    "product_category": "Klicke auf ein Produkt und danach auf 'In den Warenkorb', falls vorhanden.",
+    "popup_leadform": "Klicke den Schließen-Button (X) des Overlays, falls vorhanden.",
+}
+
+
+def decide_next_interaction(category: str, clickable_elements: list[dict], llm_client=None) -> dict | None:
+    goal = _INTERACTION_GOALS.get(category)
+    if not goal or not clickable_elements or llm_client is None:
+        return None
+
+    elements_text = "\n".join(
+        f'- "{el["text"]}" (selector: {el["selector"]})' for el in clickable_elements[:40]
+    )
+    prompt = (
+        f"Ziel: {goal}\n\n"
+        f"Anklickbare Elemente auf der aktuellen Seite:\n{elements_text}\n\n"
+        'Antworte AUSSCHLIESSLICH mit einem JSON-Objekt {"type": "click", "target": "<selector>"} '
+        'für das nächste sinnvolle Element, oder {"type": "none"}, falls kein Element zum Ziel passt.'
+    )
+    try:
+        response = llm_client.messages.create(
+            model="claude-sonnet-5",
+            max_tokens=200,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        result = json.loads(response.content[0].text)
+    except Exception as exc:  # noqa: BLE001 - deliberate broad catch, LLM call
+        logger.warning("decide_next_interaction failed, skipping: %s", exc)
+        return None
+
+    if result.get("type") == "click" and result.get("target"):
+        return {"type": "click", "target": result["target"]}
+    return None
