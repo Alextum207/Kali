@@ -52,7 +52,15 @@ startxref
             f.write(minimal_pdf)
 
 
-# Patch weasyprint before importing app.reports
-mock_weasyprint = MagicMock()
-mock_weasyprint.HTML = MockHTML
-sys.modules["weasyprint"] = mock_weasyprint
+# Conditionally mock weasyprint only if the real import fails (GTK unavailable).
+# This allows environments with proper WeasyPrint to use the real library.
+# Comment explains: mock exists because Windows lacks GTK runtime; future envs
+# with proper WeasyPrint/GTK will test the real library.
+if "weasyprint" not in sys.modules:
+    try:
+        import weasyprint as _real_weasyprint  # noqa: F401
+    except (ImportError, OSError):
+        # GTK dependency missing (e.g., Windows without GTK runtime)
+        mock_weasyprint = MagicMock()
+        mock_weasyprint.HTML = MockHTML
+        sys.modules["weasyprint"] = mock_weasyprint

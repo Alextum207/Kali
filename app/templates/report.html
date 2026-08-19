@@ -29,7 +29,7 @@
       <td>
         <div class="evidence">
           {{ f.evidence_data.get("quote") or f.evidence_data.get("selector") or "" }}
-          {% if f.evidence_data.get("citation") and f.evidence_data.get("citation") is not none %}
+          {% if f.evidence_data.get("citation") %}
           <span class="citation">{{ f.evidence_data.get("citation") }}</span>
           {% endif %}
         </div>
