@@ -19,33 +19,39 @@ def test_start_scan_and_view_findings(tmp_path, monkeypatch):
 
     monkeypatch.setattr(main_module, "run_scan", fake_run_scan)
 
-    client = TestClient(main_module.app)
+    with TestClient(main_module.app) as client:
+        response = client.post("/scans", data={"url": "https://example.com"}, follow_redirects=False)
+        assert response.status_code == 303  # redirect to scan detail
+        scan_url = response.headers["location"]
 
-    response = client.post("/scans", data={"url": "https://example.com"}, follow_redirects=False)
-    assert response.status_code == 303  # redirect to scan detail
-    scan_url = response.headers["location"]
-
-    detail = client.get(scan_url)
-    assert detail.status_code == 200
-    assert "Confirm Shaming" in detail.text
+        detail = client.get(scan_url)
+        assert detail.status_code == 200
+        assert "Confirm Shaming" in detail.text
 
 
 def test_dashboard_renders():
-    client = TestClient(main_module.app)
-    response = client.get("/")
-    assert response.status_code == 200
-    assert "Scan starten" in response.text
+    with TestClient(main_module.app) as client:
+        response = client.get("/")
+        assert response.status_code == 200
+        assert "Scan starten" in response.text
 
 
 def test_scan_detail_404_for_missing_scan(tmp_path, monkeypatch):
     monkeypatch.setattr(main_module, "DB_PATH", str(tmp_path / "test.db"))
-    client = TestClient(main_module.app)
-    response = client.get("/scans/9999")
-    assert response.status_code == 404
+    with TestClient(main_module.app) as client:
+        response = client.get("/scans/9999")
+        assert response.status_code == 404
 
 
 def test_scan_report_404_for_missing_scan(tmp_path, monkeypatch):
     monkeypatch.setattr(main_module, "DB_PATH", str(tmp_path / "test.db"))
-    client = TestClient(main_module.app)
-    response = client.get("/scans/9999/report.pdf")
-    assert response.status_code == 404
+    with TestClient(main_module.app) as client:
+        response = client.get("/scans/9999/report.pdf")
+        assert response.status_code == 404
+
+
+def test_start_scan_rejects_unsafe_url(tmp_path, monkeypatch):
+    monkeypatch.setattr(main_module, "DB_PATH", str(tmp_path / "test.db"))
+    with TestClient(main_module.app) as client:
+        response = client.post("/scans", data={"url": "file:///etc/passwd"}, follow_redirects=False)
+        assert response.status_code == 400
