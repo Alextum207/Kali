@@ -1,0 +1,41 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  body { font-family: sans-serif; margin: 20px; }
+  h1 { font-size: 18px; margin-bottom: 20px; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+  th, td { border: 1px solid #999; padding: 8px; text-align: left; font-size: 12px; }
+  th { background-color: #f0f0f0; font-weight: bold; }
+  .citation { display: block; margin-top: 4px; padding-top: 4px; border-top: 1px solid #ddd; font-size: 11px; color: #666; font-style: italic; }
+  .evidence { word-break: break-word; }
+</style>
+</head>
+<body>
+  <h1>Dark-Pattern-Prüfbericht: {{ url }}</h1>
+  <table>
+    <tr>
+      <th>Pattern-Typ</th>
+      <th>Rechtsnorm</th>
+      <th>Confidence</th>
+      <th>Beleg</th>
+    </tr>
+    {% for f in findings %}
+    <tr>
+      <td>{{ f.pattern_type }}</td>
+      <td>{{ f.target_norm }}</td>
+      <td>{{ "%.2f"|format(f.confidence_score) }}</td>
+      <td>
+        <div class="evidence">
+          {{ f.evidence_data.get("quote") or f.evidence_data.get("selector") or "" }}
+          {% if f.evidence_data.get("citation") and f.evidence_data.get("citation") is not none %}
+          <span class="citation">{{ f.evidence_data.get("citation") }}</span>
+          {% endif %}
+        </div>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+</body>
+</html>
