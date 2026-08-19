@@ -9,7 +9,6 @@ from playwright.async_api import async_playwright
 
 from app.db import init_db, get_scan, get_findings
 from app.scan import run_scan
-from app.reports import generate_pdf_report
 from app.url_safety import validate_scan_url
 
 DB_PATH = os.environ.get("DB_PATH", "./data/monitor.db")
@@ -82,6 +81,12 @@ def scan_detail(request: Request, scan_id: int, conn: sqlite3.Connection = Depen
 
 @app.get("/scans/{scan_id}/report.pdf")
 def scan_report(scan_id: int, conn: sqlite3.Connection = Depends(_get_conn)):
+    # Imported here, not at module level: WeasyPrint (pulled in by
+    # app.reports) requires native GTK libraries that aren't installed on
+    # every dev machine (e.g. Windows without GTK) — importing it eagerly
+    # would crash the whole app at startup just to serve the dashboard.
+    from app.reports import generate_pdf_report
+
     scan = get_scan(conn, scan_id)
     if scan is None:
         raise HTTPException(status_code=404, detail="Scan not found")

@@ -26,23 +26,31 @@ _REJECT_KEYWORDS = (
 
 
 async def _read_style(page, selector: str) -> dict | None:
-    box = await page.eval_on_selector(
-        selector,
-        """el => {
-            const rect = el.getBoundingClientRect();
-            const style = getComputedStyle(el);
-            const parseRgb = (s) => {
-                const m = s.match(/\\d+/g);
-                return m ? [parseInt(m[0]), parseInt(m[1]), parseInt(m[2])] : [0, 0, 0];
-            };
-            return {
-                width: rect.width,
-                height: rect.height,
-                bg_color: parseRgb(style.backgroundColor),
-                text_color: parseRgb(style.color),
-            };
-        }""",
-    )
+    # ponytail: eval_on_selector raises (not None-returns) when no element
+    # matches — on real sites #accept/#reject essentially never exist, so
+    # this must degrade gracefully. Upgrade path: real button discovery via
+    # accessible-text matching (see _REJECT_KEYWORDS) instead of hardcoded IDs.
+    try:
+        box = await page.eval_on_selector(
+            selector,
+            """el => {
+                const rect = el.getBoundingClientRect();
+                const style = getComputedStyle(el);
+                const parseRgb = (s) => {
+                    const m = s.match(/\\d+/g);
+                    return m ? [parseInt(m[0]), parseInt(m[1]), parseInt(m[2])] : [0, 0, 0];
+                };
+                return {
+                    width: rect.width,
+                    height: rect.height,
+                    bg_color: parseRgb(style.backgroundColor),
+                    text_color: parseRgb(style.color),
+                };
+            }""",
+        )
+    except Exception as exc:  # noqa: BLE001 - deliberate broad catch, missing selector
+        logger.debug("No element matched %r for style read: %s", selector, exc)
+        return None
     if box is None:
         return None
     box["bg_color"] = tuple(box["bg_color"])
