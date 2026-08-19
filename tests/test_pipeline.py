@@ -39,3 +39,24 @@ def test_run_analysis_without_button_styles_skips_visual_stage(monkeypatch):
     findings = run_analysis(DOM_HTML, None)
     pattern_types = {f["pattern_type"] for f in findings}
     assert "Visuelle Asymmetrie (Button)" not in pattern_types
+
+
+def _raising_classify_text(text, client=None):
+    raise RuntimeError("simulated LLM/API failure")
+
+
+def test_run_analysis_survives_classify_text_failure(monkeypatch):
+    monkeypatch.setattr("app.analysis.pipeline.classify_text", _raising_classify_text)
+
+    button_styles = {
+        "accept": {"width": 200, "height": 60, "bg_color": (0, 128, 0), "text_color": (255, 255, 255)},
+        "reject": {"width": 60, "height": 20, "bg_color": (230, 230, 230), "text_color": (240, 240, 240)},
+    }
+
+    findings = run_analysis(DOM_HTML, button_styles)
+
+    pattern_types = {f["pattern_type"] for f in findings}
+    # Heuristic and visual findings still present; only the LLM stage is missing.
+    assert "Pre-ticked Box" in pattern_types
+    assert "Visuelle Asymmetrie (Button)" in pattern_types
+    assert "Confirm Shaming" not in pattern_types
