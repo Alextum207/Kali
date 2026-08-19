@@ -119,3 +119,67 @@ def test_decide_next_interaction_returns_none_on_llm_failure():
 
     result = decide_next_interaction("product_category", CLICKABLE_ELEMENTS, llm_client=_BrokenClient())
     assert result is None
+
+
+import pathlib
+import pytest
+from playwright.async_api import async_playwright
+from app.site_crawler import crawl_site
+
+TWO_PAGE_SITE_URL = pathlib.Path(__file__).parent.joinpath(
+    "fixtures/site_two_pages/index.html"
+).as_uri()
+
+
+@pytest.mark.asyncio
+async def test_crawl_site_follows_same_directory_links_up_to_max_pages(tmp_path):
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        result = await crawl_site(
+            TWO_PAGE_SITE_URL, browser, max_pages=5, har_dir=str(tmp_path),
+            url_validator=lambda url: None,  # file:// fixtures aren't http(s); bypass SSRF check for this local test
+        )
+        await browser.close()
+
+    urls = {p["url"] for p in result["pages"]}
+    assert TWO_PAGE_SITE_URL in urls
+    assert any("page2.html" in u for u in urls)
+    assert len(result["pages"]) <= 5
+    assert result["har_path"].endswith(".har")
+    assert all("category" in p for p in result["pages"])
+
+
+@pytest.mark.asyncio
+async def test_crawl_site_respects_max_pages_limit(tmp_path):
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        result = await crawl_site(
+            TWO_PAGE_SITE_URL, browser, max_pages=1, har_dir=str(tmp_path),
+            url_validator=lambda url: None,
+        )
+        await browser.close()
+
+    assert len(result["pages"]) == 1
+    assert result["pages"][0]["url"] == TWO_PAGE_SITE_URL
+
+
+@pytest.mark.asyncio
+async def test_crawl_site_default_validator_rejects_unsafe_discovered_links(tmp_path, monkeypatch):
+    def fake_discover_links(dom_html, base_url, allowed_hosts):
+        return ["http://127.0.0.1:9/internal"]  # loopback — must be rejected
+
+    monkeypatch.setattr("app.site_crawler.discover_links", fake_discover_links)
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        # Note: no url_validator override here — exercises the real default
+        # (validate_scan_url), which also rejects file:// for the start URL's
+        # discovered "children" the same way it would reject a loopback IP.
+        result = await crawl_site(
+            TWO_PAGE_SITE_URL, browser, max_pages=5, har_dir=str(tmp_path)
+        )
+        await browser.close()
+
+    urls = {p["url"] for p in result["pages"]}
+    assert "http://127.0.0.1:9/internal" not in urls
+    assert len(result["pages"]) == 1  # only the start page — the discovered link was rejected
