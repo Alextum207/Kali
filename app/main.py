@@ -1,6 +1,6 @@
 import os
 
-from fastapi import FastAPI, Form, Request
+from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse, HTMLResponse, FileResponse
 from fastapi.templating import Jinja2Templates
 
@@ -40,6 +40,8 @@ async def start_scan(url: str = Form(...)):
 def scan_detail(request: Request, scan_id: int):
     conn = _get_conn()
     scan = get_scan(conn, scan_id)
+    if scan is None:
+        raise HTTPException(status_code=404, detail="Scan not found")
     findings = get_findings(conn, scan_id)
     return templates.TemplateResponse(
         request, "scan_detail.html", {"scan": scan, "findings": findings}
@@ -50,6 +52,8 @@ def scan_detail(request: Request, scan_id: int):
 def scan_report(scan_id: int):
     conn = _get_conn()
     scan = get_scan(conn, scan_id)
+    if scan is None:
+        raise HTTPException(status_code=404, detail="Scan not found")
     findings = get_findings(conn, scan_id)
     out_path = os.path.join(EVIDENCE_DIR, f"scan_{scan_id}_report.pdf")
     generate_pdf_report(scan["url"], findings, out_path)

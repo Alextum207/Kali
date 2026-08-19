@@ -35,3 +35,17 @@ def test_dashboard_renders():
     response = client.get("/")
     assert response.status_code == 200
     assert "Scan starten" in response.text
+
+
+def test_scan_detail_404_for_missing_scan(tmp_path, monkeypatch):
+    monkeypatch.setattr(main_module, "DB_PATH", str(tmp_path / "test.db"))
+    client = TestClient(main_module.app)
+    response = client.get("/scans/9999")
+    assert response.status_code == 404
+
+
+def test_scan_report_404_for_missing_scan(tmp_path, monkeypatch):
+    monkeypatch.setattr(main_module, "DB_PATH", str(tmp_path / "test.db"))
+    client = TestClient(main_module.app)
+    response = client.get("/scans/9999/report.pdf")
+    assert response.status_code == 404
