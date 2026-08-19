@@ -1,20 +1,31 @@
+import os
+
 import pytest
 from app.db import init_db, get_findings
+from app.evidence import sha256_bytes
 from app.scan import run_scan
 
-FAKE_CRAWL_RESULT = {
-    "dom_before": "<html><body><input type='checkbox' id='nl' checked></body></html>",
-    "dom_after": "<html><body><input type='checkbox' id='nl' checked></body></html>",
-    "screenshot": b"\x89PNG-fake-bytes",
-    "har_path": "/tmp/fake-crawl.har",
-    "button_styles": None,
-}
+FAKE_HAR_BYTES = b'{"log": {"fake": true}}'
+
+
+def _fake_crawl_result(har_dir):
+    har_path = os.path.join(har_dir, "fake-crawl.har")
+    with open(har_path, "wb") as f:
+        f.write(FAKE_HAR_BYTES)
+    return {
+        "dom_before": "<html><body><input type='checkbox' id='nl' checked></body></html>",
+        "dom_after": "<html><body><input type='checkbox' id='nl' checked></body></html>",
+        "screenshot": b"\x89PNG-fake-bytes",
+        "har_path": har_path,
+        "button_styles": None,
+    }
 
 
 @pytest.mark.asyncio
 async def test_run_scan_persists_findings_with_evidence(tmp_path, monkeypatch):
-    async def fake_crawl_page(url, browser):
-        return FAKE_CRAWL_RESULT
+    async def fake_crawl_page(url, browser, har_dir=None):
+        assert har_dir == str(tmp_path)
+        return _fake_crawl_result(har_dir)
 
     def fake_run_analysis(dom_html, button_styles, llm_client=None):
         return [
@@ -41,14 +52,15 @@ async def test_run_scan_persists_findings_with_evidence(tmp_path, monkeypatch):
     evidence = findings[0]["evidence_data"]
     assert "screenshot_sha256" in evidence
     assert "screenshot_path" in evidence
-    assert evidence["har_path"] == "/tmp/fake-crawl.har"
+    assert evidence["har_path"].startswith(str(tmp_path))
+    assert evidence["har_sha256"] == sha256_bytes(FAKE_HAR_BYTES)
     assert evidence["citation"] == "citation for Art. 4 Nr. 11, Art. 7 Abs. 4 DSGVO"
 
 
 @pytest.mark.asyncio
 async def test_run_scan_citation_none_does_not_crash(tmp_path, monkeypatch):
-    async def fake_crawl_page(url, browser):
-        return FAKE_CRAWL_RESULT
+    async def fake_crawl_page(url, browser, har_dir=None):
+        return _fake_crawl_result(har_dir)
 
     def fake_run_analysis(dom_html, button_styles, llm_client=None):
         return [
