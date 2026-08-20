@@ -53,6 +53,26 @@ _CATEGORY_KEYWORDS = {
     "product_category": ("product", "produkt", "/p/", "kategorie", "category"),
 }
 
+# The 3 categories predictable from a URL alone (unlike cookie_consent and
+# popup_leadform, which are states detected on whatever page they occur on,
+# not link targets to steer toward) — used to prioritize the crawl queue.
+TARGET_CATEGORIES = ("checkout_payment", "account_subscription", "product_category")
+
+# Safety cap on decide_next_interaction/click loops within one category flow
+# (e.g. multi-step checkout) — a ceiling against dead-loop pages, not a goal.
+MAX_FLOW_STEPS = 5
+
+
+def _predict_category_from_url(url: str) -> str:
+    """Cheap, DOM-free category guess for queue ordering only — the real
+    classification (classify_page_category) still runs once the page is
+    actually visited."""
+    haystack = url.lower()
+    for category, keywords in _CATEGORY_KEYWORDS.items():
+        if any(kw in haystack for kw in keywords):
+            return category
+    return "other"
+
 
 def _llm_classify_category(url: str, dom_html: str, client) -> str:
     import re
@@ -173,6 +193,61 @@ async def _check_infinite_scroll(page) -> bool:
         return False
 
 
+async def _walk_category_flow(
+    page, category: str, snapshot: dict, llm_client=None, max_extra_pages: int = 0
+) -> tuple[dict, list[dict]]:
+    """Repeats decide_next_interaction + click for the page's category
+    (checkout, cancellation, product, popup, ...) until the flow's own goal
+    is reached (no further interaction target), the category changes (flow
+    left its target area), or MAX_FLOW_STEPS fires as a safety net — instead
+    of a fixed number of pages per category, which doesn't fit flows of
+    very different natural length (a cookie banner vs. a 4-step checkout).
+
+    Returns the (possibly updated, if the last step didn't navigate) snapshot
+    for the page that was already appended by the caller, plus a list of
+    additional page dicts for every step that navigated to a new URL."""
+    extra_pages: list[dict] = []
+    for _ in range(MAX_FLOW_STEPS):
+        if len(extra_pages) >= max_extra_pages:
+            break
+        clickable = await _extract_clickable_elements(page)
+        interaction = decide_next_interaction(category, clickable, llm_client=llm_client)
+        if not interaction or not interaction.get("target"):
+            break
+        try:
+            el = await page.query_selector(interaction["target"])
+            if not el or not await el.is_visible():
+                break
+            before_url = page.url
+            await el.click(timeout=2000)
+            await asyncio.sleep(1.0)
+        except Exception as exc:  # noqa: BLE001 - deliberate broad catch, page state can vary
+            logger.debug("crawl_site: flow interaction click failed: %s", exc)
+            break
+
+        snapshot = await _snapshot_page(page)
+        new_category = classify_page_category(page.url, snapshot["dom_after"], llm_client=llm_client)
+
+        if page.url != before_url:
+            extra_pages.append(
+                {
+                    "url": page.url,
+                    "category": new_category,
+                    "dom_after": snapshot["dom_after"],
+                    "screenshot": snapshot["screenshot"],
+                    "button_styles": snapshot["button_styles"],
+                    "contrast_findings": snapshot["contrast_findings"],
+                    "infinite_scroll_detected": False,
+                }
+            )
+
+        if new_category != category:
+            break
+        category = new_category
+
+    return snapshot, extra_pages
+
+
 async def crawl_site(
     start_url: str,
     browser,
@@ -197,13 +272,19 @@ async def crawl_site(
     start_host = urlparse(start_url).hostname or ""
     allowed_hosts = {start_host}
 
-    queue = [start_url]
+    # Two-tier queue instead of plain FIFO: links predicted (by cheap URL
+    # heuristic) to hit one of the 3 target categories are visited before
+    # everything else, so a big site doesn't burn its whole max_pages budget
+    # on generic pages before reaching checkout/account/product pages.
+    priority_queue = [start_url]
+    other_queue: list[str] = []
     visited: set[str] = set()
     pages: list[dict] = []
+    completed_categories: set[str] = set()
 
     try:
-        while queue and len(pages) < max_pages:
-            url = queue.pop(0)
+        while (priority_queue or other_queue) and len(pages) < max_pages:
+            url = priority_queue.pop(0) if priority_queue else other_queue.pop(0)
             if url in visited:
                 continue
             visited.add(url)
@@ -223,39 +304,55 @@ async def crawl_site(
                 await _check_infinite_scroll(page) if category in ("product_category", "other") else False
             )
 
-            clickable = await _extract_clickable_elements(page)
-            interaction = decide_next_interaction(category, clickable, llm_client=llm_client)
-            if interaction and interaction.get("target"):
-                try:
-                    el = await page.query_selector(interaction["target"])
-                    if el and await el.is_visible():
-                        await el.click(timeout=2000)
-                        await asyncio.sleep(1.0)
-                        snapshot["dom_after"] = await page.content()
-                except Exception as exc:
-                    logger.debug("crawl_site: interaction click failed: %s", exc)
+            initial_page = {
+                "url": url,
+                "category": category,
+                "dom_after": snapshot["dom_after"],
+                "screenshot": snapshot["screenshot"],
+                "button_styles": snapshot["button_styles"],
+                "contrast_findings": snapshot["contrast_findings"],
+                "infinite_scroll_detected": infinite_scroll,
+            }
+            pages.append(initial_page)
 
-            pages.append(
-                {
-                    "url": url,
-                    "category": category,
-                    "dom_after": snapshot["dom_after"],
-                    "screenshot": snapshot["screenshot"],
-                    "button_styles": snapshot["button_styles"],
-                    "contrast_findings": snapshot["contrast_findings"],
-                    "infinite_scroll_detected": infinite_scroll,
-                }
+            # Flow-driven walk: keeps clicking through this category's goal
+            # (checkout, cancellation, ...) until it's done, not a fixed page
+            # count — see _walk_category_flow docstring.
+            updated_snapshot, flow_pages = await _walk_category_flow(
+                page, category, snapshot, llm_client=llm_client, max_extra_pages=max_pages - len(pages)
             )
+            initial_page["dom_after"] = updated_snapshot["dom_after"]
+            initial_page["screenshot"] = updated_snapshot["screenshot"]
+            initial_page["button_styles"] = updated_snapshot["button_styles"]
+            initial_page["contrast_findings"] = updated_snapshot["contrast_findings"]
+            pages.extend(flow_pages)
+            for flow_page in flow_pages:
+                visited.add(flow_page["url"])
+            for visited_page in [initial_page, *flow_pages]:
+                if visited_page["category"] in TARGET_CATEGORIES:
+                    completed_categories.add(visited_page["category"])
 
+            all_targets_done = len(completed_categories) >= len(TARGET_CATEGORIES)
             for link in discover_links(snapshot["dom_after"], url, allowed_hosts):
-                if link in visited or link in queue:
+                if link in visited or link in priority_queue or link in other_queue:
                     continue
                 try:
                     url_validator(link)
                 except ValueError as exc:
                     logger.info("crawl_site: skipping unsafe discovered link %r: %s", link, exc)
                     continue
-                queue.append(link)
+                predicted = _predict_category_from_url(link)
+                if predicted in TARGET_CATEGORIES:
+                    # Always keep following target-category links, even if
+                    # that category was already visited once — e.g. cart.html
+                    # and checkout.html both predict checkout_payment, but
+                    # checkout.html is a deeper step of the same flow, not a
+                    # duplicate. "Completed" only gates generic other links.
+                    priority_queue.append(link)
+                elif not all_targets_done:
+                    other_queue.append(link)
+                # else: all 3 target categories already covered and this is
+                # a generic link — drop it, that's the point of focusing.
 
             await page.close()
     finally:

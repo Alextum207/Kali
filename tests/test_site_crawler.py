@@ -183,3 +183,116 @@ async def test_crawl_site_default_validator_rejects_unsafe_discovered_links(tmp_
     urls = {p["url"] for p in result["pages"]}
     assert "http://127.0.0.1:9/internal" not in urls
     assert len(result["pages"]) == 1  # only the start page — the discovered link was rejected
+
+
+# --- Kategorie-fokussierter Crawl: Queue-Priorisierung + Flow-Walk ---
+
+PRIORITY_SITE_URL = pathlib.Path(__file__).parent.joinpath(
+    "fixtures/site_priority/index.html"
+).as_uri()
+
+FLOW_CHECKOUT_URL = pathlib.Path(__file__).parent.joinpath(
+    "fixtures/site_flow_checkout/checkout/step1.html"
+).as_uri()
+
+FLOW_CATEGORY_CHANGE_URL = pathlib.Path(__file__).parent.joinpath(
+    "fixtures/site_flow_leaves_target/checkout/step1.html"
+).as_uri()
+
+FLOW_LOOP_URL = pathlib.Path(__file__).parent.joinpath(
+    "fixtures/site_flow_loop/checkout/a.html"
+).as_uri()
+
+
+class _SequentialFakeClient:
+    """Like _FakeClient, but returns a different scripted response per call
+    — needed to drive a multi-step decide_next_interaction flow (click,
+    then eventually 'none')."""
+
+    class _Messages:
+        def __init__(self, outer):
+            self._outer = outer
+
+        def create(self, **kwargs):
+            idx = min(self._outer.calls, len(self._outer._responses) - 1)
+            self._outer.calls += 1
+            return _FakeMessage(self._outer._responses[idx])
+
+    def __init__(self, response_texts):
+        self._responses = list(response_texts)
+        self.calls = 0
+        self.messages = self._Messages(self)
+
+
+@pytest.mark.asyncio
+async def test_crawl_site_prioritizes_target_category_links_over_other(tmp_path):
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        result = await crawl_site(
+            PRIORITY_SITE_URL, browser, max_pages=2, har_dir=str(tmp_path),
+            url_validator=lambda url: None,
+        )
+        await browser.close()
+
+    urls = {p["url"] for p in result["pages"]}
+    assert PRIORITY_SITE_URL in urls
+    assert any("checkout/start.html" in u for u in urls)
+    assert not any("about.html" in u for u in urls)  # deprioritized, budget ran out first
+
+
+@pytest.mark.asyncio
+async def test_crawl_site_walks_category_flow_across_pages_until_no_interaction(tmp_path):
+    client = _SequentialFakeClient([
+        '{"type": "click", "target": "a#next"}',  # step1 -> step2
+        '{"type": "none"}',  # step2: flow goal reached
+    ])
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        result = await crawl_site(
+            FLOW_CHECKOUT_URL, browser, max_pages=5, har_dir=str(tmp_path),
+            llm_client=client, url_validator=lambda url: None,
+        )
+        await browser.close()
+
+    urls = [p["url"] for p in result["pages"]]
+    assert len(urls) == 2
+    assert "step1.html" in urls[0]
+    assert "step2.html" in urls[1]
+    assert all(p["category"] == "checkout_payment" for p in result["pages"])
+
+
+@pytest.mark.asyncio
+async def test_crawl_site_flow_stops_when_category_changes(tmp_path):
+    client = _SequentialFakeClient([
+        '{"type": "click", "target": "a#next"}',  # step1 (checkout) -> imprint (other)
+    ])
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        result = await crawl_site(
+            FLOW_CATEGORY_CHANGE_URL, browser, max_pages=5, har_dir=str(tmp_path),
+            llm_client=client, url_validator=lambda url: None,
+        )
+        await browser.close()
+
+    assert len(result["pages"]) == 2
+    assert result["pages"][0]["category"] == "checkout_payment"
+    assert result["pages"][1]["category"] == "other"
+
+
+@pytest.mark.asyncio
+async def test_crawl_site_flow_has_a_safety_cap_against_loops(tmp_path):
+    # Always offers the same click target — a.html and b.html link back and
+    # forth to each other forever without MAX_FLOW_STEPS.
+    client = _FakeClient('{"type": "click", "target": "a#next"}')
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        result = await crawl_site(
+            FLOW_LOOP_URL, browser, max_pages=20, har_dir=str(tmp_path),
+            llm_client=client, url_validator=lambda url: None,
+        )
+        await browser.close()
+
+    from app.site_crawler import MAX_FLOW_STEPS
+
+    assert len(result["pages"]) <= MAX_FLOW_STEPS + 1
+    assert len(result["pages"]) < 20  # proves the cap fired, not max_pages

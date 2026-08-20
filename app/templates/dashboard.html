@@ -5,6 +5,7 @@
   <h1>Dark-Pattern-Monitor</h1>
   <form method="post" action="/scans">
     <input type="url" name="url" placeholder="https://..." required>
+    <input type="number" name="max_pages" value="5" min="1" title="Max. Seiten">
     <button type="submit">Scan starten</button>
   </form>
 </body>
