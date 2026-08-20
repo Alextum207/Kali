@@ -5,3 +5,5 @@ data/evidence/
 data/monitor.db
 .venv/
 datasets/
+
+.worktrees/
