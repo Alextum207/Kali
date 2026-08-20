@@ -1,3 +1,5 @@
+import re
+
 from bs4 import BeautifulSoup
 
 
@@ -35,7 +37,7 @@ def find_preticked_checkboxes(dom_html: str) -> list[dict]:
 # and Shadow DOM countdowns are not detectable via class/id string matching alone —
 # would need computed-style inspection. Left as-is; add if Computed-Styles data
 # lands from crawl layer.
-COUNTDOWN_HINTS = ("countdown", "timer", "deal-timer", "ablauf", "zaehler", "zähler")
+COUNTDOWN_HINTS = ("countdown", "timer", "deal-timer", "ablaufzeit", "restlaufzeit", "zaehler", "zähler")
 
 
 def find_countdown_elements(dom_html: str) -> list[dict]:
@@ -69,6 +71,20 @@ _NEGATION_KEYWORDS = (
     "do not",
 )
 
+# Left-word-boundary matching (not plain substring) so e.g. "ohne" doesn't
+# match mid-word inside words like "bewohnen" — routine German vocabulary on
+# checkout/registration pages. No trailing \b, deliberately: German negation
+# words conjugate/inflect ("verzicht" -> "verzichte"/"verzichtet") and a
+# leading boundary is enough to rule out the false-positive substring case
+# while still matching those suffixed forms.
+_NEGATION_PATTERN = re.compile(
+    "|".join(rf"\b{re.escape(kw)}" for kw in _NEGATION_KEYWORDS)
+)
+
+
+def _has_negation(text: str) -> bool:
+    return bool(_NEGATION_PATTERN.search(text.lower()))
+
 
 def _label_text_for(soup, box) -> str:
     box_id = box.get("id")
@@ -94,8 +110,8 @@ def find_trick_questions(dom_html: str) -> list[dict]:
     for i in range(len(labeled) - 1):
         box_a, text_a = labeled[i]
         box_b, text_b = labeled[i + 1]
-        negated_a = any(kw in text_a.lower() for kw in _NEGATION_KEYWORDS)
-        negated_b = any(kw in text_b.lower() for kw in _NEGATION_KEYWORDS)
+        negated_a = _has_negation(text_a)
+        negated_b = _has_negation(text_b)
         if negated_a != negated_b:
             findings.append(
                 {

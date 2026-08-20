@@ -2,6 +2,16 @@ import re
 
 from app.crawler import LEGAL_TEXT_KEYWORDS as _LEGAL_KEYWORDS
 
+# flag_complex_language contrasts legal-sentence readability against the
+# surrounding marketing copy's readability — it needs a *narrow*, precise
+# legal-sentence bucket, unlike find_low_contrast_legal_text (which uses the
+# wider _LEGAL_KEYWORDS/LEGAL_TEXT_KEYWORDS for recall). Pulling generic
+# commercial terms like "preis"/"kosten"/"laufzeit" into this bucket lets
+# ordinary marketing sentences ("Bester Preis!") count as "legal", raising
+# the legal bucket's average readability and shrinking the delta this
+# heuristic depends on. Keep this list to the original, narrower terms.
+_COMPLEX_LANGUAGE_KEYWORDS = ("kündigung", "widerruf", "gebühr", "vertragslaufzeit", "agb", "schiedsgericht")
+
 
 def _count_syllables(word: str) -> int:
     groups = re.findall(r"[aeiouyäöü]+", word.lower())
@@ -32,7 +42,7 @@ def _split_sentences(text: str, split_style: str = "word") -> list[str]:
         sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", protected) if s.strip()]
     else:
         # Default: split on sequence of sentence-ending punctuation (removes punctuation)
-        sentences = [s for s in re.split(r"[.!?]+", protected) if s.strip()]
+        sentences = [s.strip() for s in re.split(r"[.!?]+", protected) if s.strip()]
 
     # Restore placeholders to dots
     return [s.replace("<DOT>", ".") for s in sentences]
@@ -61,7 +71,7 @@ def flag_complex_language(text: str) -> dict | None:
     reader isn't struggling with the whole page, just the part that
     matters legally."""
     sentences = _split_sentences(text, split_style="lookahead")
-    legal_sentences = [s for s in sentences if any(kw in s.lower() for kw in _LEGAL_KEYWORDS)]
+    legal_sentences = [s for s in sentences if any(kw in s.lower() for kw in _COMPLEX_LANGUAGE_KEYWORDS)]
     other_sentences = [s for s in sentences if s not in legal_sentences]
     if not legal_sentences or not other_sentences:
         return None

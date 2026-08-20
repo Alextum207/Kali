@@ -15,15 +15,29 @@ class _FakeBlock:
         self.type = "text"
 
 
+class _FakeToolUseBlock:
+    """Mimics an Anthropic tool_use content block, shaped like what
+    llm_classify._extract_findings expects (block.type/name/input)."""
+
+    def __init__(self, name, input_):
+        self.type = "tool_use"
+        self.name = name
+        self.input = input_
+
+
 class _FakeMessage:
-    def __init__(self, text):
-        self.content = [_FakeBlock(text)]
+    def __init__(self, content):
+        # Accept either a single text block (str) or a list of pre-built
+        # content blocks (e.g. a tool_use block).
+        self.content = [_FakeBlock(content)] if isinstance(content, str) else content
 
 
 class _StubLLMClient:
     """Deterministic stand-in for the Anthropic client: always says "no
-    dark patterns" for text classification, and always declines to
-    interact further (so the crawl stays within the 5 fixture pages)."""
+    dark patterns" for text classification (via a real report_findings
+    tool_use block, matching the schema-enforced contract), and always
+    declines to interact further (so the crawl stays within the 5 fixture
+    pages)."""
 
     class messages:
         @staticmethod
@@ -31,6 +45,11 @@ class _StubLLMClient:
             prompt_text = str(kwargs.get("messages", [{}])[0].get("content", ""))
             if "AUSSCHLIESSLICH mit einem JSON-Objekt" in prompt_text:
                 return _FakeMessage('{"type": "none"}')
+            tools = kwargs.get("tools") or []
+            if tools and tools[0].get("name") == "report_findings":
+                return _FakeMessage(
+                    [_FakeToolUseBlock("report_findings", {"findings": []})]
+                )
             return _FakeMessage("[]")
 
 

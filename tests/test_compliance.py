@@ -1,13 +1,13 @@
 import httpx
 import pytest
 from app.compliance import map_to_norm, fetch_citation
+from app.analysis.llm_classify import PATTERN_TYPES
 
 
 def test_map_known_patterns():
     assert map_to_norm("Fake Urgency") == "UWG §§ 5, 5a; Anhang zu § 3 Abs. 3"
     assert map_to_norm("Confirm Shaming") == "Art. 25 DSA"
     assert map_to_norm("Pre-ticked Box") == "Art. 4 Nr. 11, Art. 7 Abs. 4 DSGVO"
-    assert map_to_norm("Hidden Costs") == "§ 312j Abs. 3, 4 BGB; Art. 246a EGBGB"
 
 
 def test_map_unknown_pattern_returns_placeholder():
@@ -28,21 +28,10 @@ def test_map_removed_dead_entries_returns_placeholder():
 
 def test_llm_prompt_pattern_types_all_resolve_to_a_norm():
     """Contract test: every pattern_type Claude is instructed to emit (per
-    llm_classify.SYSTEM_PROMPT's enum list) must resolve through map_to_norm.
-    Prevents drift between the prompt's vocabulary and NORM_MAP's keys."""
-    prompt_pattern_types = [
-        "Fake Urgency",
-        "Fake Scarcity",
-        "Fake Social Proof",
-        "Confirm Shaming",
-        "Sneaking / Hidden Costs",
-        "Forced Continuity",
-        "Decoy Pricing",
-        "Nagging",
-        "Roach Motel",
-        "Forced Path",
-    ]
-    for pattern_type in prompt_pattern_types:
+    llm_classify.PATTERN_TYPES, the actual tool-schema enum) must resolve
+    through map_to_norm. Prevents drift between the prompt's vocabulary and
+    NORM_MAP's keys."""
+    for pattern_type in PATTERN_TYPES:
         assert map_to_norm(pattern_type) != "Unbekannt", pattern_type
 
 

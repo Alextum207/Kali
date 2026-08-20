@@ -39,7 +39,7 @@ def test_split_sentences_handles_abbreviations():
     sentences = _split_sentences(text, split_style="word")
     # Should be 1 sentence, not 4 (Art., Nr., bzw., z.B. each followed by a period).
     assert len(sentences) == 1
-    assert sentences[0].strip() == "Gemäß Art. 5 Nr. 2 bzw. z.B. hier"
+    assert sentences[0] == "Gemäß Art. 5 Nr. 2 bzw. z.B. hier"
 
 
 def test_split_sentences_preserves_actual_sentence_endings():
@@ -47,9 +47,9 @@ def test_split_sentences_preserves_actual_sentence_endings():
     text = "First sentence. Second sentence! Third sentence?"
     sentences = _split_sentences(text, split_style="word")
     assert len(sentences) == 3
-    assert sentences[0].strip() == "First sentence"
-    assert sentences[1].strip() == "Second sentence"
-    assert sentences[2].strip() == "Third sentence"
+    assert sentences[0] == "First sentence"
+    assert sentences[1] == "Second sentence"
+    assert sentences[2] == "Third sentence"
 
 
 def test_split_sentences_lookahead_style():
