@@ -4,6 +4,16 @@
 <body>
   <h1>Scan: {{ scan.url }}</h1>
   <a href="/scans/{{ scan.id }}/report.pdf">PDF-Report herunterladen</a>
+
+  <h2>Gecrawlte Seiten</h2>
+  <table border="1">
+    <tr><th>URL</th><th>Kategorie</th></tr>
+    {% for p in pages %}
+    <tr><td><a href="/scans/{{ scan.id }}/pages/{{ p.id }}">{{ p.url }}</a></td><td>{{ p.category }}</td></tr>
+    {% endfor %}
+  </table>
+
+  <h2>Alle Findings (Site-weit)</h2>
   <table border="1">
     <tr><th>Pattern-Typ</th><th>Norm</th><th>Confidence</th></tr>
     {% for f in findings %}

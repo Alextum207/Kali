@@ -7,7 +7,7 @@ from fastapi.responses import RedirectResponse, HTMLResponse, FileResponse
 from fastapi.templating import Jinja2Templates
 from playwright.async_api import async_playwright
 
-from app.db import init_db, get_scan, get_findings
+from app.db import init_db, get_scan, get_findings, get_pages, get_page_findings
 from app.scan import run_site_scan
 from app.url_safety import validate_scan_url
 
@@ -78,9 +78,21 @@ def scan_detail(request: Request, scan_id: int, conn: sqlite3.Connection = Depen
     scan = get_scan(conn, scan_id)
     if scan is None:
         raise HTTPException(status_code=404, detail="Scan not found")
+    pages = get_pages(conn, scan_id)
     findings = get_findings(conn, scan_id)
     return templates.TemplateResponse(
-        request, "scan_detail.html", {"scan": scan, "findings": findings}
+        request, "scan_detail.html", {"scan": scan, "pages": pages, "findings": findings}
+    )
+
+
+@app.get("/scans/{scan_id}/pages/{page_id}", response_class=HTMLResponse)
+def page_detail(request: Request, scan_id: int, page_id: int, conn: sqlite3.Connection = Depends(_get_conn)):
+    scan = get_scan(conn, scan_id)
+    if scan is None:
+        raise HTTPException(status_code=404, detail="Scan not found")
+    findings = get_page_findings(conn, page_id)
+    return templates.TemplateResponse(
+        request, "page_detail.html", {"scan": scan, "page_id": page_id, "findings": findings}
     )
 
 

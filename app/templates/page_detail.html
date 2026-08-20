@@ -1,0 +1,14 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Seite {{ page_id }} — Scan {{ scan.id }}</title></head>
+<body>
+  <h1>Seite: {{ scan.url }} (Findings dieser Seite)</h1>
+  <a href="/scans/{{ scan.id }}">Zurück zur Scan-Übersicht</a>
+  <table border="1">
+    <tr><th>Pattern-Typ</th><th>Norm</th><th>Confidence</th></tr>
+    {% for f in findings %}
+    <tr><td>{{ f.pattern_type }}</td><td>{{ f.target_norm }}</td><td>{{ f.confidence_score }}</td></tr>
+    {% endfor %}
+  </table>
+</body>
+</html>

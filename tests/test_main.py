@@ -75,3 +75,45 @@ def test_start_scan_rejects_unsafe_url(tmp_path, monkeypatch):
     with TestClient(main_module.app) as client:
         response = client.post("/scans", data={"url": "file:///etc/passwd"}, follow_redirects=False)
         assert response.status_code == 400
+
+
+def test_page_detail_shows_findings_for_one_page(tmp_path, monkeypatch):
+    monkeypatch.setattr(main_module, "DB_PATH", str(tmp_path / "test.db"))
+    monkeypatch.setattr(main_module, "EVIDENCE_DIR", str(tmp_path / "evidence"))
+
+    from app.db import init_db, insert_scan, insert_page, insert_finding
+
+    conn = init_db(str(tmp_path / "test.db"))
+    scan_id = insert_scan(conn, "https://example.com")
+    page_id = insert_page(conn, scan_id, "https://example.com/checkout", "checkout_payment")
+    insert_finding(
+        conn, scan_id,
+        {"pattern_type": "Trick Questions", "target_norm": "Art. 4 Nr. 11, Art. 7 Abs. 4 DSGVO",
+         "confidence_score": 0.7, "evidence_data": {}},
+        page_id=page_id,
+    )
+    conn.close()
+
+    with TestClient(main_module.app) as client:
+        response = client.get(f"/scans/{scan_id}/pages/{page_id}")
+
+    assert response.status_code == 200
+    assert "Trick Questions" in response.text
+
+
+def test_scan_detail_lists_pages(tmp_path, monkeypatch):
+    monkeypatch.setattr(main_module, "DB_PATH", str(tmp_path / "test.db"))
+    monkeypatch.setattr(main_module, "EVIDENCE_DIR", str(tmp_path / "evidence"))
+
+    from app.db import init_db, insert_scan, insert_page
+
+    conn = init_db(str(tmp_path / "test.db"))
+    scan_id = insert_scan(conn, "https://example.com")
+    insert_page(conn, scan_id, "https://example.com/checkout", "checkout_payment")
+    conn.close()
+
+    with TestClient(main_module.app) as client:
+        response = client.get(f"/scans/{scan_id}")
+
+    assert response.status_code == 200
+    assert "checkout_payment" in response.text
