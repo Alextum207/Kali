@@ -50,9 +50,12 @@ Vier Seiten, gemeinsames `base.html`-Layout (Nav: "Dashboard" /
    in `app/db.py` (aktuell gibt es nur `get_scan()` für eine ID).
 2. **`GET /scans/{id}` — Scan-Detail.** Risk-Summary-Header (aggregierter
    Score, Anzahl Findings je Pattern-Kategorie) oben, darunter
-   Findings-Tabelle mit clientseitigen Filtern (Pattern-Type, Norm,
-   Confidence-Schwelle — reines HTML/CSS `<select>` + kleines Vanilla-JS,
-   kein Framework) statt der aktuellen ungefilterten Liste.
+   Findings-Tabelle mit Filtern (Pattern-Type, Norm, Confidence-Schwelle)
+   statt der aktuellen ungefilterten Liste. **Update nach Nutzer-Vorgabe
+   "so wenig Code wie möglich":** Filter laufen serverseitig über
+   Query-Parameter (`?pattern_type=&target_norm=&min_confidence=`), ein
+   `<form method="get">` mit `<select>`/`<input>` — kein JavaScript, keine
+   Filterlogik im Browser, direkt mit dem bestehenden `TestClient` testbar.
 3. **`GET /scans/{id}/pages/{page_id}` — Page-Detail.** Bleibt inhaltlich
    wie jetzt (Screenshot + Findings der Unterseite), nur im neuen visuellen
    System.
