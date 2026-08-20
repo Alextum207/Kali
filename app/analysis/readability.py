@@ -1,6 +1,6 @@
 import re
 
-_LEGAL_KEYWORDS = ("kündigung", "widerruf", "gebühr", "vertragslaufzeit", "agb", "schiedsgericht")
+from app.crawler import LEGAL_TEXT_KEYWORDS as _LEGAL_KEYWORDS
 
 
 def _count_syllables(word: str) -> int:

@@ -15,13 +15,17 @@ def find_preticked_checkboxes(dom_html: str) -> list[dict]:
     for box in soup.find_all("input", {"type": "checkbox"}):
         if "checked" not in box.attrs:
             continue
-        if "required" in box.attrs:
-            continue  # a legally required checkbox isn't a dark pattern
+        forced_required = "required" in box.attrs
         findings.append(
             {
                 "pattern_type": "Pre-ticked Box",
-                "confidence_score": 0.9,
-                "evidence_data": {"selector": _selector_for(box)},
+                # A pre-ticked box marked `required` forces the user to keep
+                # consent to proceed at all — more suspicious, not less.
+                "confidence_score": 0.95 if forced_required else 0.9,
+                "evidence_data": {
+                    "selector": _selector_for(box),
+                    "forced_required": forced_required,
+                },
             }
         )
     return findings
@@ -48,7 +52,18 @@ def find_countdown_elements(dom_html: str) -> list[dict]:
     return findings
 
 
-_NEGATION_KEYWORDS = ("nicht", "kein", "keine", "not", "don't", "do not")
+_NEGATION_KEYWORDS = (
+    "nicht",
+    "kein",
+    "keine",
+    "ohne",
+    "niemals",
+    "verzicht",
+    "verzichten",
+    "not",
+    "don't",
+    "do not",
+)
 
 
 def _label_text_for(soup, box) -> str:

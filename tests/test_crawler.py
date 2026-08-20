@@ -9,7 +9,16 @@ from app.crawler import (
     apply_consent_rules,
     _snapshot_page,
     _looks_like_captcha,
+    LEGAL_TEXT_KEYWORDS,
 )
+
+
+def test_legal_text_keywords_is_shared_with_readability_module():
+    from app.analysis.readability import _LEGAL_KEYWORDS
+
+    assert _LEGAL_KEYWORDS is LEGAL_TEXT_KEYWORDS
+    for kw in ("laufzeit", "kosten", "preis", "datenschutz", "rücktritt", "haftung", "widerspruch"):
+        assert kw in LEGAL_TEXT_KEYWORDS
 
 
 def test_looks_like_captcha_detects_recaptcha_iframe():

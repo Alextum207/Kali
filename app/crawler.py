@@ -26,7 +26,21 @@ _REJECT_KEYWORDS = (
     "alle ablehnen",
 )
 
-_LEGAL_TEXT_KEYWORDS = ("kündigung", "widerruf", "gebühr", "vertragslaufzeit", "agb", "schiedsgericht")
+LEGAL_TEXT_KEYWORDS = (
+    "kündigung",
+    "widerruf",
+    "gebühr",
+    "vertragslaufzeit",
+    "agb",
+    "schiedsgericht",
+    "laufzeit",
+    "kosten",
+    "preis",
+    "datenschutz",
+    "rücktritt",
+    "haftung",
+    "widerspruch",
+)
 
 
 async def _read_style(page, selector: str) -> dict | None:
@@ -306,7 +320,7 @@ async def find_low_contrast_legal_text(page) -> list[dict]:
     findings = []
     for e, c in zip(elements, contrasts):
         text_lower = e["text"].lower()
-        if not any(kw in text_lower for kw in _LEGAL_TEXT_KEYWORDS):
+        if not any(kw in text_lower for kw in LEGAL_TEXT_KEYWORDS):
             continue
         camouflaged = c < median_contrast * 0.6 or (e["font_size"] and e["font_size"] < median_font * 0.75)
         if camouflaged:
