@@ -13,6 +13,7 @@ load_dotenv()
 import anthropic
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse, HTMLResponse, FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from playwright.async_api import async_playwright
 from pydantic import BaseModel
@@ -53,6 +54,12 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Dark-Pattern-Monitor", lifespan=lifespan)
 
 templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "templates"))
+
+app.mount(
+    "/static",
+    StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static")),
+    name="static",
+)
 
 
 def _get_conn():

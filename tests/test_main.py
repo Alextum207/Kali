@@ -237,3 +237,10 @@ def test_scan_detail_lists_pages(tmp_path, monkeypatch):
 
     assert response.status_code == 200
     assert "checkout_payment" in response.text
+
+
+def test_static_stylesheet_is_served():
+    with TestClient(main_module.app) as client:
+        response = client.get("/static/style.css")
+        assert response.status_code == 200
+        assert "text/css" in response.headers["content-type"]

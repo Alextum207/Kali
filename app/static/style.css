@@ -1,0 +1,73 @@
+:root {
+  --color-bg: #ffffff;
+  --color-text: #111111;
+  --color-border: #dddddd;
+  --color-muted: #666666;
+  --color-risk-low: #1a7f37;
+  --color-risk-medium: #b35c00;
+  --color-risk-high: #c9302c;
+  --font-size-sm: 0.85rem;
+  --font-size-base: 1rem;
+  --font-size-lg: 1.25rem;
+  --font-size-xl: 1.75rem;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 1rem;
+  --space-4: 1.5rem;
+  --space-5: 2rem;
+  --space-6: 3rem;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: -apple-system, "Segoe UI", sans-serif;
+  color: var(--color-text);
+  background: var(--color-bg);
+  font-size: var(--font-size-base);
+}
+
+.nav {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-5);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.nav-brand { font-weight: 700; font-size: var(--font-size-lg); text-decoration: none; color: var(--color-text); }
+.nav a { text-decoration: none; color: var(--color-text); }
+.container { max-width: 960px; margin: 0 auto; padding: var(--space-5); }
+h1 { font-size: var(--font-size-xl); margin-bottom: var(--space-4); }
+
+table { width: 100%; border-collapse: collapse; margin-bottom: var(--space-4); }
+th, td { border-bottom: 1px solid var(--color-border); padding: var(--space-2) var(--space-3); text-align: left; font-size: var(--font-size-sm); }
+th { color: var(--color-muted); font-weight: 600; text-transform: uppercase; font-size: 0.75rem; }
+
+.badge { display: inline-block; padding: var(--space-1) var(--space-2); border-radius: 4px; font-size: var(--font-size-sm); font-weight: 600; color: #fff; }
+.badge-niedrig { background: var(--color-risk-low); }
+.badge-mittel { background: var(--color-risk-medium); }
+.badge-hoch { background: var(--color-risk-high); }
+
+.card { border: 1px solid var(--color-border); border-radius: 8px; padding: var(--space-4); margin-bottom: var(--space-4); }
+
+.filters { display: flex; gap: var(--space-3); margin-bottom: var(--space-4); align-items: flex-end; flex-wrap: wrap; }
+.filters label { display: flex; flex-direction: column; font-size: var(--font-size-sm); gap: var(--space-1); }
+
+.scan-form { display: flex; gap: var(--space-3); margin-bottom: var(--space-5); flex-wrap: wrap; }
+
+button, input, select {
+  font-family: inherit;
+  font-size: var(--font-size-base);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+}
+
+button {
+  cursor: pointer;
+  background: var(--color-text);
+  color: #fff;
+  border-color: var(--color-text);
+}
