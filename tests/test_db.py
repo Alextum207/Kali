@@ -69,3 +69,23 @@ def test_init_db_adds_page_id_column_idempotently(tmp_path):
     cols = [row[1] for row in conn2.execute("PRAGMA table_info(findings)")]
     assert "page_id" in cols
     conn2.close()
+
+
+def test_list_scans_returns_newest_first():
+    from app.db import list_scans
+
+    conn = init_db(":memory:")
+    first_id = insert_scan(conn, "https://a.example.com")
+    second_id = insert_scan(conn, "https://b.example.com")
+
+    scans = list_scans(conn)
+
+    assert [s["id"] for s in scans] == [second_id, first_id]
+    assert scans[0]["url"] == "https://b.example.com"
+
+
+def test_list_scans_returns_empty_list_when_no_scans():
+    from app.db import list_scans
+
+    conn = init_db(":memory:")
+    assert list_scans(conn) == []

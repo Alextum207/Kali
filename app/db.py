@@ -111,3 +111,8 @@ def get_page_findings(conn: sqlite3.Connection, page_id: int) -> list[dict]:
 def get_scan(conn: sqlite3.Connection, scan_id: int) -> dict | None:
     row = conn.execute("SELECT * FROM scans WHERE id = ?", (scan_id,)).fetchone()
     return dict(row) if row else None
+
+
+def list_scans(conn: sqlite3.Connection) -> list[dict]:
+    rows = conn.execute("SELECT * FROM scans ORDER BY id DESC").fetchall()
+    return [dict(row) for row in rows]
