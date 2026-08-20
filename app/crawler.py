@@ -92,6 +92,21 @@ def _looks_like_reject(hint) -> bool:
     return any(kw in joined for kw in _REJECT_KEYWORDS)
 
 
+# Some Consent-O-Matic rules use a bare tag selector like "button" scoped to
+# a `parent` container (e.g. a <section> containing the cookie-notice link)
+# that _iter_click_candidates doesn't reconstruct — clicking it unscoped
+# would hit the first visible <button>/<a>/... anywhere on the page, which
+# on an ordinary site (e.g. a product page's "add to cart" button) is not a
+# cookie-consent control at all. Refuse to blind-click a selector this
+# generic; only qualified selectors (id/class/attribute) are safe to click
+# without the rule's scoping.
+_GENERIC_TAG_SELECTORS = {"a", "button", "div", "span", "input", "section", "p"}
+
+
+def _is_generic_selector(selector: str) -> bool:
+    return selector.strip().lower() in _GENERIC_TAG_SELECTORS
+
+
 async def apply_consent_rules(page, rules_dir: str = DEFAULT_CONSENT_RULES_DIR) -> None:
     """Best-effort cookie-banner rejection using vendored Consent-O-Matic rules.
 
@@ -114,6 +129,8 @@ async def apply_consent_rules(page, rules_dir: str = DEFAULT_CONSENT_RULES_DIR) 
                 continue
 
             for selector, hint in _iter_click_candidates(data):
+                if _is_generic_selector(selector):
+                    continue
                 if not _looks_like_reject(hint):
                     continue
                 try:
