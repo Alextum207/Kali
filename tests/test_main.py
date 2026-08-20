@@ -244,3 +244,34 @@ def test_static_stylesheet_is_served():
         response = client.get("/static/style.css")
         assert response.status_code == 200
         assert "text/css" in response.headers["content-type"]
+
+
+def test_dashboard_lists_scans_with_risk_badge(tmp_path, monkeypatch):
+    monkeypatch.setattr(main_module, "DB_PATH", str(tmp_path / "test.db"))
+
+    from app.db import init_db, insert_scan, insert_finding
+
+    conn = init_db(str(tmp_path / "test.db"))
+    scan_id = insert_scan(conn, "https://example.com")
+    insert_finding(conn, scan_id, {
+        "pattern_type": "Confirm Shaming",
+        "target_norm": "Art. 25 DSA",
+        "confidence_score": 0.9,
+        "evidence_data": {},
+    })
+    conn.close()
+
+    with TestClient(main_module.app) as client:
+        response = client.get("/")
+
+    assert response.status_code == 200
+    assert "example.com" in response.text
+    assert "badge-hoch" in response.text
+
+
+def test_dashboard_shows_empty_state_without_scans(tmp_path, monkeypatch):
+    monkeypatch.setattr(main_module, "DB_PATH", str(tmp_path / "test.db"))
+    with TestClient(main_module.app) as client:
+        response = client.get("/")
+    assert response.status_code == 200
+    assert "Noch keine Scans" in response.text

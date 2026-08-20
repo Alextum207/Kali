@@ -18,8 +18,9 @@ from fastapi.templating import Jinja2Templates
 from playwright.async_api import async_playwright
 from pydantic import BaseModel
 
+from app.compliance import aggregate_risk_score
 from app.crawler import CaptchaRequiredError
-from app.db import init_db, get_scan, get_findings, get_pages, get_page_findings
+from app.db import init_db, get_scan, get_findings, get_pages, get_page_findings, list_scans
 from app.scan import run_site_scan
 from app.url_safety import validate_scan_url
 
@@ -91,8 +92,11 @@ def _attach_display_fields(findings: list[dict], pages: list[dict], scan_url: st
 
 
 @app.get("/", response_class=HTMLResponse)
-def dashboard(request: Request):
-    return templates.TemplateResponse(request, "dashboard.html")
+def dashboard(request: Request, conn: sqlite3.Connection = Depends(_get_conn)):
+    scans = list_scans(conn)
+    for scan in scans:
+        scan["risk"] = aggregate_risk_score(get_findings(conn, scan["id"]))
+    return templates.TemplateResponse(request, "dashboard.html", {"scans": scans})
 
 
 @app.get("/evidence/{filename}")
