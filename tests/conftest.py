@@ -64,3 +64,14 @@ if "weasyprint" not in sys.modules:
         mock_weasyprint = MagicMock()
         mock_weasyprint.HTML = MockHTML
         sys.modules["weasyprint"] = mock_weasyprint
+
+
+@pytest.fixture(autouse=True)
+def _clear_category_cache():
+    """classify_page_category's LLM-routing cache is a module-level dict;
+    clear it between tests so cache hits don't leak across test functions."""
+    from app.site_crawler import _CATEGORY_CACHE
+
+    _CATEGORY_CACHE.clear()
+    yield
+    _CATEGORY_CACHE.clear()

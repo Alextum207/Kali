@@ -86,6 +86,60 @@ async def test_classify_page_category_llm_failure_falls_back_to_other():
     assert result == "other"
 
 
+class _CountingMessages:
+    def __init__(self, response_text):
+        self._response_text = response_text
+        self.call_count = 0
+
+    async def create(self, **kwargs):
+        self.call_count += 1
+        return _FakeMessage(self._response_text)
+
+
+class _CountingClient:
+    def __init__(self, response_text):
+        self.messages = _CountingMessages(response_text)
+
+
+@pytest.mark.asyncio
+async def test_classify_page_category_llm_result_is_cached_for_same_url_and_dom():
+    client = _CountingClient("popup_leadform")
+    dom = "<h1>Über uns</h1>"
+    first = await classify_page_category("https://shop.example.com/about-us", dom, llm_client=client)
+    second = await classify_page_category("https://shop.example.com/about-us", dom, llm_client=client)
+    assert first == "popup_leadform"
+    assert second == "popup_leadform"
+    assert client.messages.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_classify_page_category_cache_misses_on_dom_content_change():
+    client = _CountingClient("popup_leadform")
+    url = "https://shop.example.com/about-us"
+    await classify_page_category(url, "<h1>Über uns</h1>", llm_client=client)
+    await classify_page_category(url, "<h1>Über uns - neu</h1>", llm_client=client)
+    assert client.messages.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_classify_page_category_cache_expires_after_ttl(monkeypatch):
+    import app.site_crawler as site_crawler
+
+    client = _CountingClient("popup_leadform")
+    url = "https://shop.example.com/about-us"
+    dom = "<h1>Über uns</h1>"
+
+    fake_now = [1000.0]
+    monkeypatch.setattr(site_crawler.time, "monotonic", lambda: fake_now[0])
+
+    await classify_page_category(url, dom, llm_client=client)
+    assert client.messages.call_count == 1
+
+    fake_now[0] += site_crawler._CATEGORY_CACHE_TTL_SECONDS + 1
+    await classify_page_category(url, dom, llm_client=client)
+    assert client.messages.call_count == 2
+
+
 from app.site_crawler import decide_next_interaction
 
 CLICKABLE_ELEMENTS = [

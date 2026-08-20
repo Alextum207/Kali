@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -71,6 +72,16 @@ TARGET_CATEGORIES = ("checkout_payment", "account_subscription", "product_catego
 # (e.g. multi-step checkout) — a ceiling against dead-loop pages, not a goal.
 MAX_FLOW_STEPS = int(os.environ.get("MAX_FLOW_STEPS", "3"))
 
+# Cache for classify_page_category's LLM fallback ONLY — a routing decision
+# (which queue bucket a URL belongs to), never for dark-pattern findings.
+# Keyed on url+DOM-content-hash so any content change invalidates it.
+_CATEGORY_CACHE: dict[str, tuple[str, float]] = {}
+_CATEGORY_CACHE_TTL_SECONDS = int(os.environ.get("CATEGORY_CACHE_TTL_SECONDS", "600"))
+
+
+def _category_cache_key(url: str, dom_html: str) -> str:
+    return f"{url}:{hashlib.sha256(dom_html.encode('utf-8', 'ignore')).hexdigest()}"
+
 
 def _predict_category_from_url(url: str) -> str:
     """Cheap, DOM-free category guess for queue ordering only — the real
@@ -114,10 +125,17 @@ async def classify_page_category(url: str, dom_html: str, llm_client=None) -> st
             return category
 
     if llm_client is not None:
+        key = _category_cache_key(url, dom_html)
+        cached = _CATEGORY_CACHE.get(key)
+        if cached is not None and time.monotonic() - cached[1] < _CATEGORY_CACHE_TTL_SECONDS:
+            return cached[0]
         try:
-            return await _llm_classify_category(url, dom_html, llm_client)
+            category = await _llm_classify_category(url, dom_html, llm_client)
         except Exception as exc:  # noqa: BLE001 - deliberate broad catch, LLM call
             logger.warning("LLM category classification failed, using 'other': %s", exc)
+            return "other"
+        _CATEGORY_CACHE[key] = (category, time.monotonic())
+        return category
 
     return "other"
 
