@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: kali-dark-pattern-monitor
+    env: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false # set manually in the Render dashboard, not committed
+      - key: LEGAL_TEXT_MCP_BASE_URL
+        value: http://localhost:8091 # optional side-service, not deployed here — compliance.py degrades gracefully if unreachable
+    # Free plan has no persistent disk: /var/data resets on every restart/
+    # redeploy (fine for demo purposes). To keep scan history across
+    # restarts, switch `plan` to `starter` and uncomment the disk below —
+    # it mounts at the same /var/data path the Dockerfile already writes to.
+    # disk:
+    #   name: kali-data
+    #   mountPath: /var/data
+    #   sizeGB: 1
