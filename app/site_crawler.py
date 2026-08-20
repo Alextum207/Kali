@@ -72,37 +72,6 @@ TARGET_CATEGORIES = ("checkout_payment", "account_subscription", "product_catego
 MAX_FLOW_STEPS = int(os.environ.get("MAX_FLOW_STEPS", "3"))
 
 
-# chrome.cookies.getAll()'s sameSite values -> Playwright's add_cookies()
-# values. Chrome's "unspecified" (no explicit SameSite attribute) behaves as
-# Lax under Chrome's own default-Lax policy, so map it there rather than to
-# Playwright's stricter "Strict".
-_SAME_SITE_MAP = {
-    "no_restriction": "None",
-    "lax": "Lax",
-    "strict": "Strict",
-    "unspecified": "Lax",
-}
-
-
-def _chrome_cookies_to_playwright(cookies: list[dict]) -> list[dict]:
-    """Maps the shape chrome.cookies.getAll() returns (extension-side) to
-    what Playwright's BrowserContext.add_cookies() expects (server-side) —
-    see docs/superpowers/specs/2026-08-20-chrome-extension-cookie-handoff-design.md."""
-    converted = []
-    for c in cookies:
-        converted.append({
-            "name": c["name"],
-            "value": c["value"],
-            "domain": c["domain"],
-            "path": c.get("path", "/"),
-            "expires": -1 if c.get("session") else c.get("expirationDate", -1),
-            "httpOnly": bool(c.get("httpOnly", False)),
-            "secure": bool(c.get("secure", False)),
-            "sameSite": _SAME_SITE_MAP.get(c.get("sameSite"), "Lax"),
-        })
-    return converted
-
-
 def _predict_category_from_url(url: str) -> str:
     """Cheap, DOM-free category guess for queue ordering only — the real
     classification (classify_page_category) still runs once the page is
@@ -298,7 +267,6 @@ async def crawl_site(
     llm_client=None,
     url_validator=validate_scan_url,
     time_budget_seconds: float | None = None,
-    cookies: list[dict] | None = None,
 ) -> dict:
     """DFS crawl of a whole site starting from start_url, staying within the
     start URL's host + subdomains. One shared browser context (one HAR file
@@ -310,13 +278,7 @@ async def crawl_site(
     time_budget_seconds caps how long the loop keeps discovering/visiting
     NEW pages (checked once per iteration, not preemptive) — a page already
     in flight, including its flow-walk, always runs to completion, so actual
-    wall time can exceed the budget by up to one page's worst case.
-
-    cookies, if given, are in chrome.cookies.getAll() shape (Chrome
-    Extension cookie handoff — see docs/superpowers/specs/
-    2026-08-20-chrome-extension-cookie-handoff-design.md) and are injected
-    into the context before the first page loads, so the crawl continues
-    with an already-authenticated/consent-resolved session."""
+    wall time can exceed the budget by up to one page's worst case."""
     from urllib.parse import urlparse
 
     if time_budget_seconds is None:
@@ -326,8 +288,6 @@ async def crawl_site(
     pathlib.Path(har_dir).mkdir(parents=True, exist_ok=True)
     har_path = str(pathlib.Path(har_dir) / f"site-crawl-{uuid.uuid4().hex}.har")
     context = await browser.new_context(record_har_path=har_path)
-    if cookies:
-        await context.add_cookies(_chrome_cookies_to_playwright(cookies))
 
     start_host = urlparse(start_url).hostname or ""
     allowed_hosts = {start_host}

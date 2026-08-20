@@ -12,11 +12,10 @@ load_dotenv()
 
 import anthropic
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
-from fastapi.responses import RedirectResponse, HTMLResponse, FileResponse, JSONResponse
+from fastapi.responses import RedirectResponse, HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from playwright.async_api import async_playwright
-from pydantic import BaseModel
 
 from app.compliance import aggregate_risk_score
 from app.crawler import CaptchaRequiredError
@@ -137,46 +136,6 @@ async def start_scan(
             detail=f"Captcha erkannt auf {exc.url} — bitte manuell lösen und Scan erneut starten.",
         ) from exc
     return RedirectResponse(url=f"/scans/{scan_id}", status_code=303)
-
-
-class ExtensionScanRequest(BaseModel):
-    url: str
-    cookies: list[dict] = []
-
-
-@app.post("/scans/extension")
-async def start_scan_from_extension(
-    request: Request,
-    body: ExtensionScanRequest,
-    conn: sqlite3.Connection = Depends(_get_conn),
-):
-    """Chrome-Extension cookie-handoff entrypoint — see
-    docs/superpowers/specs/2026-08-20-chrome-extension-cookie-handoff-design.md.
-    Same validation/pipeline as POST /scans, plus cookies (chrome.cookies.
-    getAll() shape) injected into the Playwright context before the crawl,
-    so it continues with the tab's already-authenticated/consent-resolved
-    session. Returns JSON (not a redirect) — the extension's service worker
-    opens the result tab itself."""
-    try:
-        validate_scan_url(body.url)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    try:
-        scan_id = await run_site_scan(
-            body.url,
-            conn,
-            EVIDENCE_DIR,
-            browser=request.app.state.browser,
-            llm_client=_LLM_CLIENT,
-            cookies=body.cookies,
-        )
-    except CaptchaRequiredError as exc:
-        raise HTTPException(
-            status_code=409,
-            detail={"error": "captcha_required", "url": exc.url},
-        ) from exc
-    return JSONResponse({"scan_id": scan_id})
 
 
 @app.get("/scans/{scan_id}", response_class=HTMLResponse)

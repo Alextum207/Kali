@@ -126,7 +126,7 @@ import pathlib
 import pytest
 from playwright.async_api import async_playwright
 from app.crawler import CaptchaRequiredError
-from app.site_crawler import crawl_site, _chrome_cookies_to_playwright
+from app.site_crawler import crawl_site
 
 CAPTCHA_START_URL = pathlib.Path(__file__).parent.joinpath(
     "fixtures/site_captcha_start/index.html"
@@ -170,37 +170,6 @@ async def test_crawl_site_ignores_captcha_marker_on_a_subpage(tmp_path):
     assert any("page2.html" in u for u in urls)
 
 
-def test_chrome_cookies_to_playwright_maps_fields():
-    chrome_cookies = [
-        {
-            "name": "session", "value": "abc123", "domain": "example.com", "path": "/app",
-            "secure": True, "httpOnly": True, "sameSite": "lax", "expirationDate": 1999999999.0,
-        },
-        {
-            "name": "temp", "value": "xyz", "domain": "example.com",
-            "session": True, "sameSite": "no_restriction",
-        },
-    ]
-
-    result = _chrome_cookies_to_playwright(chrome_cookies)
-
-    assert result[0] == {
-        "name": "session", "value": "abc123", "domain": "example.com", "path": "/app",
-        "expires": 1999999999.0, "httpOnly": True, "secure": True, "sameSite": "Lax",
-    }
-    # session cookie (no expirationDate, session=True) -> expires -1, defaults filled in
-    assert result[1] == {
-        "name": "temp", "value": "xyz", "domain": "example.com", "path": "/",
-        "expires": -1, "httpOnly": False, "secure": False, "sameSite": "None",
-    }
-
-
-def test_chrome_cookies_to_playwright_maps_unspecified_samesite_to_lax():
-    result = _chrome_cookies_to_playwright(
-        [{"name": "n", "value": "v", "domain": "d", "sameSite": "unspecified"}]
-    )
-    assert result[0]["sameSite"] == "Lax"
-
 TWO_PAGE_SITE_URL = pathlib.Path(__file__).parent.joinpath(
     "fixtures/site_two_pages/index.html"
 ).as_uri()
@@ -236,25 +205,6 @@ async def test_crawl_site_respects_max_pages_limit(tmp_path):
 
     assert len(result["pages"]) == 1
     assert result["pages"][0]["url"] == TWO_PAGE_SITE_URL
-
-
-@pytest.mark.asyncio
-async def test_crawl_site_injects_cookies_before_crawling(tmp_path):
-    """Extension cookie-handoff: cookies (chrome.cookies.getAll() shape) get
-    injected into the context before the first page loads. Domain here is
-    unrelated to the file:// fixture — this only proves add_cookies is
-    called successfully with the converted shape, not that the cookie is
-    actually sent on this particular (file://) navigation."""
-    chrome_cookies = [{"name": "session", "value": "abc", "domain": "example.com", "sameSite": "lax"}]
-    async with async_playwright() as p:
-        browser = await p.chromium.launch()
-        result = await crawl_site(
-            TWO_PAGE_SITE_URL, browser, max_pages=1, har_dir=str(tmp_path),
-            url_validator=lambda url: None, cookies=chrome_cookies,
-        )
-        await browser.close()
-
-    assert len(result["pages"]) == 1
 
 
 @pytest.mark.asyncio

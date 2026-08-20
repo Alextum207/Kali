@@ -132,7 +132,6 @@ async def run_site_scan(
     max_pages: int | None = None,
     llm_client=None,
     url_validator=None,
-    cookies: list[dict] | None = None,
 ) -> int:
     if max_pages is None:
         max_pages = int(os.environ.get("MAX_PAGES_PER_SCAN", "15"))
@@ -142,13 +141,10 @@ async def run_site_scan(
     # url_validator is only forwarded when the caller overrides it (tests
     # exercising file:// fixtures, same pattern as crawl_site's own default
     # param) — production always relies on crawl_site's own default
-    # (validate_scan_url). cookies (Chrome-extension handoff) is likewise
-    # only forwarded when given, in chrome.cookies.getAll() shape.
+    # (validate_scan_url).
     crawl_kwargs = {"max_pages": max_pages, "har_dir": evidence_dir, "llm_client": llm_client}
     if url_validator is not None:
         crawl_kwargs["url_validator"] = url_validator
-    if cookies is not None:
-        crawl_kwargs["cookies"] = cookies
 
     site_result = await crawl_site(start_url, browser, **crawl_kwargs)
 
