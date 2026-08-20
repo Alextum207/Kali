@@ -106,14 +106,25 @@ größeren Architekturänderungen trotzdem kurz mit dem Nutzer abstimmen
 (siehe `superpowers:brainstorming`-Workflow, wurde bisher für Feature-Design
 genutzt, z.B. `docs/superpowers/specs/2026-08-19-site-crawl-category-agents-design.md`).
 
-**Laufender Umbau (Stand 2026-08-21):** Speed/Qualitäts-Überholung des
-Crawlers/der Analyse läuft auf `feat/speed-quality-overhaul`
-(Worktree `.worktrees/speed-quality-overhaul`), Plan-Mode-Doc unter
+**Abgeschlossener Umbau (Stand 2026-08-21):** Speed/Qualitäts-Überholung
+des Crawlers/der Analyse — alle 5 Phasen (Async-LLM, Time-Budget im
+Flow-Walk, Routing-Cache, Erkennungsqualitäts-Fixes inkl. Schema-Zwang für
+`pattern_type`, Doku/Kalibrierung) fertig auf `feat/speed-quality-overhaul`
+(Worktree `.worktrees/speed-quality-overhaul`), ausgeführt per
+`superpowers:subagent-driven-development` gegen den Plan unter
 `~/.claude/plans/funktioniert-es-jetzt-besser-replicated-lighthouse.md`
-(nicht im Repo — Nutzer-Home, nicht projekteigen), ausgeführt per
-`superpowers:subagent-driven-development`. Fortschritts-Ledger:
+(nicht im Repo). 7 Tasks + finale Whole-Branch-Review + 1 Fix-Runde, alle
+sauber. Vollständiges Ledger:
 `.superpowers/sdd/funktioniert-es-jetzt-besser-replicated-lighthouse/progress.md`
-in diesem Worktree (git-ignored). Bisher fertig: Phase 1 (Async-LLM),
-Phase 3 (Routing-Cache), Phase 2 (Time-Budget im Flow-Walk). Offen:
-Phase 4 (Erkennungsqualität — Schema-Zwang, Retry, Confidence-Clamp,
-Truncation-/Priorisierungs-Fixes) und Phase 5 (Doku/Kalibrierung).
+in diesem Worktree (git-ignored, wird nach dem Mergen gelöscht — Git-
+History ist dann die Aufzeichnung). Test-Stand: 134 passed, 1 skipped
+(GTK). **Offen, vor dem Mergen vom Nutzer selbst zu prüfen:** ein echter
+Scan gegen eine reale Seite, `master`/Vorgänger-Branch vs. diesem Branch
+verglichen (Fund-Anzahl, Wanduhrzeit) — die finale Review fand vier
+unabhängige, je für sich plausible Recall-Erweiterungen (Negations-
+Keywords, Legal-Keywords, Countdown-Hints, Pflicht-Checkbox-Handling), die
+zusammen die Präzision spürbar senken könnten; zwei konkrete
+Substring-Fehltreffer ("ohne" in "Wohnadresse", "ablauf" in
+"Bestellablauf") wurden bereits gefixt, der Rest ist nur per echtem Scan
+zu beurteilen (braucht Live-Netzwerk + Anthropic-API-Guthaben, deshalb
+nicht automatisiert gelaufen).
