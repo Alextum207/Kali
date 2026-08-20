@@ -193,6 +193,7 @@ def scan_detail(
         raise HTTPException(status_code=404, detail="Scan not found")
     pages = get_pages(conn, scan_id)
     findings = _attach_display_fields(get_findings(conn, scan_id), pages, scan["url"])
+    risk = aggregate_risk_score(findings)
 
     filtered = findings
     if pattern_type:
@@ -202,8 +203,6 @@ def scan_detail(
     if min_confidence is not None:
         filtered = [f for f in filtered if f["confidence_score"] >= min_confidence]
 
-    risk = aggregate_risk_score(filtered)
-
     return templates.TemplateResponse(
         request, "scan_detail.html",
         {
@@ -211,8 +210,8 @@ def scan_detail(
             "pages": pages,
             "findings": filtered,
             "risk": risk,
-            "pattern_types": sorted({f["pattern_type"] for f in filtered}),
-            "target_norms": sorted({f["target_norm"] for f in filtered}),
+            "pattern_types": sorted({f["pattern_type"] for f in findings}),
+            "target_norms": sorted({f["target_norm"] for f in findings}),
             "selected_pattern_type": pattern_type or "",
             "selected_target_norm": target_norm or "",
             "selected_min_confidence": min_confidence,

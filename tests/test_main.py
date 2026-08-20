@@ -321,7 +321,7 @@ def test_scan_detail_filters_by_pattern_type(tmp_path, monkeypatch):
 
     assert response.status_code == 200
     assert "Fake Urgency" in response.text
-    assert "Confirm Shaming" not in response.text
+    assert "<td>Confirm Shaming</td>" not in response.text
 
 
 def test_scan_detail_filters_by_min_confidence(tmp_path, monkeypatch):
@@ -346,4 +346,4 @@ def test_scan_detail_filters_by_min_confidence(tmp_path, monkeypatch):
         response = client.get(f"/scans/{scan_id}", params={"min_confidence": "0.5"})
 
     assert "Confirm Shaming" in response.text
-    assert "Fake Urgency" not in response.text
+    assert "<td>Fake Urgency</td>" not in response.text
