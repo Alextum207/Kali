@@ -2,6 +2,14 @@ import os
 import sqlite3
 from contextlib import asynccontextmanager
 
+# Must run before any `app.*` import below — several modules (app.scan,
+# app.site_crawler, ...) read os.environ at import time for their own
+# defaults (MAX_FLOW_STEPS, LEGAL_TEXT_MCP_BASE_URL, ...). load_dotenv()
+# only sets variables not already present in the environment, so an
+# explicitly exported/deployment-set env var still wins over .env.
+from dotenv import load_dotenv
+load_dotenv()
+
 import anthropic
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse, HTMLResponse, FileResponse, JSONResponse
@@ -9,6 +17,7 @@ from fastapi.templating import Jinja2Templates
 from playwright.async_api import async_playwright
 from pydantic import BaseModel
 
+from app.crawler import CaptchaRequiredError
 from app.db import init_db, get_scan, get_findings, get_pages, get_page_findings
 from app.scan import run_site_scan
 from app.url_safety import validate_scan_url
@@ -102,14 +111,20 @@ async def start_scan(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    scan_id = await run_site_scan(
-        url,
-        conn,
-        EVIDENCE_DIR,
-        browser=request.app.state.browser,
-        max_pages=max_pages,
-        llm_client=_LLM_CLIENT,
-    )
+    try:
+        scan_id = await run_site_scan(
+            url,
+            conn,
+            EVIDENCE_DIR,
+            browser=request.app.state.browser,
+            max_pages=max_pages,
+            llm_client=_LLM_CLIENT,
+        )
+    except CaptchaRequiredError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Captcha erkannt auf {exc.url} — bitte manuell lösen und Scan erneut starten.",
+        ) from exc
     return RedirectResponse(url=f"/scans/{scan_id}", status_code=303)
 
 
@@ -136,14 +151,20 @@ async def start_scan_from_extension(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    scan_id = await run_site_scan(
-        body.url,
-        conn,
-        EVIDENCE_DIR,
-        browser=request.app.state.browser,
-        llm_client=_LLM_CLIENT,
-        cookies=body.cookies,
-    )
+    try:
+        scan_id = await run_site_scan(
+            body.url,
+            conn,
+            EVIDENCE_DIR,
+            browser=request.app.state.browser,
+            llm_client=_LLM_CLIENT,
+            cookies=body.cookies,
+        )
+    except CaptchaRequiredError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "captcha_required", "url": exc.url},
+        ) from exc
     return JSONResponse({"scan_id": scan_id})
 
 

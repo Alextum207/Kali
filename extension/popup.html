@@ -33,11 +33,18 @@
         margin-top: 8px;
         font-size: 13px;
       }
+      #knopfAnim {
+        display: none;
+        width: 100%;
+        margin-top: 8px;
+        border-radius: 4px;
+      }
     </style>
   </head>
   <body>
     <h1>Kali – Dark-Pattern-Scan</h1>
     <button id="scanBtn">Scan starten</button>
+    <video id="knopfAnim" src="knopfdruck.webm" muted playsinline></video>
     <div id="status"></div>
     <a id="resultLink" href="#" target="_blank" style="display: none">Ergebnis ansehen</a>
     <script src="popup.js"></script>

@@ -1,5 +1,6 @@
 fastapi
 uvicorn[standard]
+python-dotenv
 jinja2
 python-multipart
 playwright==1.62.0

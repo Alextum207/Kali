@@ -6,6 +6,7 @@ const STATUS_KEY = "kaliScanStatus";
 const scanBtn = document.getElementById("scanBtn");
 const statusEl = document.getElementById("status");
 const resultLink = document.getElementById("resultLink");
+const knopfAnim = document.getElementById("knopfAnim");
 
 function render(status) {
   if (!status) {
@@ -28,6 +29,9 @@ function render(status) {
         resultLink.href = `${BACKEND_BASE_URL}/scans/${status.scanId}`;
         resultLink.style.display = "block";
       }
+      break;
+    case "captcha_required":
+      statusEl.textContent = `Captcha auf ${status.captchaUrl} erkannt. Bitte dort lösen, dann nochmal auf "Scan starten" klicken.`;
       break;
     case "error":
       statusEl.textContent = `Fehler: ${status.error}`;
@@ -53,5 +57,12 @@ scanBtn.addEventListener("click", async () => {
     return;
   }
   scanBtn.disabled = true;
+  knopfAnim.style.display = "block";
+  knopfAnim.currentTime = 0;
+  knopfAnim.play();
   chrome.runtime.sendMessage({ type: "START_SCAN", url: tab.url });
+});
+
+knopfAnim.addEventListener("ended", () => {
+  knopfAnim.style.display = "none";
 });

@@ -1,13 +1,22 @@
 import asyncio
 import json
 import logging
+import os
 import pathlib
+import time
 import uuid
 from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
 
-from app.crawler import DEFAULT_CONSENT_RULES_DIR, _snapshot_page, apply_consent_rules
+from app.crawler import (
+    DEFAULT_CONSENT_RULES_DIR,
+    CaptchaRequiredError,
+    _looks_like_captcha,
+    _snapshot_page,
+    apply_consent_rules,
+)
+from app.llm_utils import extract_text
 from app.url_safety import validate_scan_url
 
 logger = logging.getLogger(__name__)
@@ -60,7 +69,38 @@ TARGET_CATEGORIES = ("checkout_payment", "account_subscription", "product_catego
 
 # Safety cap on decide_next_interaction/click loops within one category flow
 # (e.g. multi-step checkout) — a ceiling against dead-loop pages, not a goal.
-MAX_FLOW_STEPS = 5
+MAX_FLOW_STEPS = int(os.environ.get("MAX_FLOW_STEPS", "3"))
+
+
+# chrome.cookies.getAll()'s sameSite values -> Playwright's add_cookies()
+# values. Chrome's "unspecified" (no explicit SameSite attribute) behaves as
+# Lax under Chrome's own default-Lax policy, so map it there rather than to
+# Playwright's stricter "Strict".
+_SAME_SITE_MAP = {
+    "no_restriction": "None",
+    "lax": "Lax",
+    "strict": "Strict",
+    "unspecified": "Lax",
+}
+
+
+def _chrome_cookies_to_playwright(cookies: list[dict]) -> list[dict]:
+    """Maps the shape chrome.cookies.getAll() returns (extension-side) to
+    what Playwright's BrowserContext.add_cookies() expects (server-side) —
+    see docs/superpowers/specs/2026-08-20-chrome-extension-cookie-handoff-design.md."""
+    converted = []
+    for c in cookies:
+        converted.append({
+            "name": c["name"],
+            "value": c["value"],
+            "domain": c["domain"],
+            "path": c.get("path", "/"),
+            "expires": -1 if c.get("session") else c.get("expirationDate", -1),
+            "httpOnly": bool(c.get("httpOnly", False)),
+            "secure": bool(c.get("secure", False)),
+            "sameSite": _SAME_SITE_MAP.get(c.get("sameSite"), "Lax"),
+        })
+    return converted
 
 
 def _predict_category_from_url(url: str) -> str:
@@ -89,7 +129,7 @@ def _llm_classify_category(url: str, dom_html: str, client) -> str:
         max_tokens=20,
         messages=[{"role": "user", "content": prompt}],
     )
-    result = response.content[0].text.strip().lower()
+    result = extract_text(response).strip().lower()
     return result if result in PAGE_CATEGORIES else "other"
 
 
@@ -151,7 +191,7 @@ def decide_next_interaction(category: str, clickable_elements: list[dict], llm_c
             max_tokens=200,
             messages=[{"role": "user", "content": prompt}],
         )
-        result = json.loads(response.content[0].text)
+        result = json.loads(extract_text(response))
     except Exception as exc:  # noqa: BLE001 - deliberate broad catch, LLM call
         logger.warning("decide_next_interaction failed, skipping: %s", exc)
         return None
@@ -225,10 +265,11 @@ async def _walk_category_flow(
             logger.debug("crawl_site: flow interaction click failed: %s", exc)
             break
 
-        snapshot = await _snapshot_page(page)
+        navigated = page.url != before_url
+        snapshot = await _snapshot_page(page, skip_diff_sleep=navigated)
         new_category = classify_page_category(page.url, snapshot["dom_after"], llm_client=llm_client)
 
-        if page.url != before_url:
+        if navigated:
             extra_pages.append(
                 {
                     "url": page.url,
@@ -256,26 +297,47 @@ async def crawl_site(
     consent_rules_dir: str = DEFAULT_CONSENT_RULES_DIR,
     llm_client=None,
     url_validator=validate_scan_url,
+    time_budget_seconds: float | None = None,
+    cookies: list[dict] | None = None,
 ) -> dict:
-    """BFS crawl of a whole site starting from start_url, staying within the
+    """DFS crawl of a whole site starting from start_url, staying within the
     start URL's host + subdomains. One shared browser context (one HAR file
     for the whole site). start_url itself is trusted (the caller already
     validated it, same contract as crawl_page) — every link DISCOVERED
     during the crawl is re-validated with `url_validator` before being
-    queued, since those were never seen by the caller."""
+    queued, since those were never seen by the caller.
+
+    time_budget_seconds caps how long the loop keeps discovering/visiting
+    NEW pages (checked once per iteration, not preemptive) — a page already
+    in flight, including its flow-walk, always runs to completion, so actual
+    wall time can exceed the budget by up to one page's worst case.
+
+    cookies, if given, are in chrome.cookies.getAll() shape (Chrome
+    Extension cookie handoff — see docs/superpowers/specs/
+    2026-08-20-chrome-extension-cookie-handoff-design.md) and are injected
+    into the context before the first page loads, so the crawl continues
+    with an already-authenticated/consent-resolved session."""
     from urllib.parse import urlparse
+
+    if time_budget_seconds is None:
+        time_budget_seconds = float(os.environ.get("SCAN_TIME_BUDGET_SECONDS", "25"))
+    start_time = time.monotonic()
 
     pathlib.Path(har_dir).mkdir(parents=True, exist_ok=True)
     har_path = str(pathlib.Path(har_dir) / f"site-crawl-{uuid.uuid4().hex}.har")
     context = await browser.new_context(record_har_path=har_path)
+    if cookies:
+        await context.add_cookies(_chrome_cookies_to_playwright(cookies))
 
     start_host = urlparse(start_url).hostname or ""
     allowed_hosts = {start_host}
 
-    # Two-tier queue instead of plain FIFO: links predicted (by cheap URL
+    # Two-tier stack instead of plain LIFO: links predicted (by cheap URL
     # heuristic) to hit one of the 3 target categories are visited before
     # everything else, so a big site doesn't burn its whole max_pages budget
-    # on generic pages before reaching checkout/account/product pages.
+    # on generic pages before reaching checkout/account/product pages. Both
+    # tiers are stacks (pop from the end) so the crawl dives depth-first
+    # into a discovered flow instead of fanning out breadth-first.
     priority_queue = [start_url]
     other_queue: list[str] = []
     visited: set[str] = set()
@@ -283,15 +345,19 @@ async def crawl_site(
     completed_categories: set[str] = set()
 
     try:
-        while (priority_queue or other_queue) and len(pages) < max_pages:
-            url = priority_queue.pop(0) if priority_queue else other_queue.pop(0)
+        while (
+            (priority_queue or other_queue)
+            and len(pages) < max_pages
+            and (time.monotonic() - start_time) < time_budget_seconds
+        ):
+            url = priority_queue.pop() if priority_queue else other_queue.pop()
             if url in visited:
                 continue
             visited.add(url)
 
             page = await context.new_page()
             try:
-                await page.goto(url)
+                await page.goto(url, wait_until="domcontentloaded")
             except Exception as exc:  # noqa: BLE001 - deliberate broad catch, a dead link shouldn't kill the crawl
                 logger.warning("crawl_site: failed to load %r: %s", url, exc)
                 await page.close()
@@ -299,6 +365,11 @@ async def crawl_site(
 
             await apply_consent_rules(page, consent_rules_dir)
             snapshot = await _snapshot_page(page)
+
+            if url == start_url and _looks_like_captcha(snapshot["dom_after"]):
+                await page.close()
+                raise CaptchaRequiredError(url)
+
             category = classify_page_category(url, snapshot["dom_after"], llm_client=llm_client)
             infinite_scroll = (
                 await _check_infinite_scroll(page) if category in ("product_category", "other") else False

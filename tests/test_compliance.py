@@ -73,4 +73,31 @@ async def test_fetch_citation_returns_none_on_connection_error():
     transport = httpx.MockTransport(handler)
     async with httpx.AsyncClient(transport=transport, base_url="http://localhost:8080") as client:
         text = await fetch_citation("Art. 25 DSA", "http://localhost:8080", client=client)
-    assert text is None
+    assert text is None  # "Art. 25 DSA" has no local STATUTE_TEXTS fallback
+
+
+@pytest.mark.asyncio
+async def test_fetch_citation_falls_back_to_local_statute_text_when_live_lookup_empty():
+    def handler(request):
+        return httpx.Response(200, json={"query": "x", "results": [], "count": 0})
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport, base_url="http://localhost:8080") as client:
+        text = await fetch_citation(
+            "UWG §§ 5, 5a; Anhang zu § 3 Abs. 3", "http://localhost:8080", client=client
+        )
+    assert text is not None
+    assert "§ 5 UWG" in text
+
+
+@pytest.mark.asyncio
+async def test_fetch_citation_prefers_live_result_over_local_fallback():
+    def handler(request):
+        return httpx.Response(200, json={
+            "results": [{"norm": {"text": "Live-Text hat Vorrang"}}]
+        })
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport, base_url="http://localhost:8080") as client:
+        text = await fetch_citation(
+            "UWG §§ 5, 5a; Anhang zu § 3 Abs. 3", "http://localhost:8080", client=client
+        )
+    assert text == "Live-Text hat Vorrang"

@@ -4,7 +4,7 @@ from app.analysis.llm_classify import classify_text
 
 class _FakeMessage:
     def __init__(self, text):
-        self.content = [type("Block", (), {"text": text})]
+        self.content = [type("Block", (), {"text": text, "type": "text"})]
 
 
 class _FakeMessages:

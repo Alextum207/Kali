@@ -160,6 +160,14 @@ reicht — vermeidet Vektor-Store, bleibt aber flexibel.
    explizit auf "keine Rechtsberatung, für eine rechtsverbindliche
    Einschätzung an Verbraucherzentrale/Anwalt wenden".
 
-Damit offen bleiben nur noch Frage 4 (muss jede Antwort ihre Quelle zitieren
-— tendenziell ja, aus demselben Beweisfestigkeits-Grund wie Punkt 3 oben,
-aber noch nicht final entschieden) und Frage 5 (Persistenz der Chat-Verläufe).
+4. **Quellenpflicht: ja.** Jede Chat-Antwort muss das konkrete Finding
+   (Finding-ID) und/oder den Normtext benennen, aus dem sie stammt — passt
+   zum "gerichtsfest"-Anspruch von Kali; eine unbelegte Antwort wäre selbst
+   eine Behauptung ohne Beleg. Praktisch: die Function-Call-Ergebnisse
+   (Option a) liefern Finding-IDs/Normverweise, die das Modell im Antworttext
+   zitieren muss (System-Prompt-Anforderung, analog zum Disclaimer in Punkt 3).
+5. **Persistenz: keine (MVP).** Chat-Verläufe sind rein session-/
+   anfragebasiert, keine neue DB-Tabelle — verschwinden bei Seitenwechsel/
+   Reload. Aufrüstbar später, falls Nutzer:innen das brauchen.
+
+Status: **alle offenen Fragen entschieden, bereit für Umsetzungsplan.**

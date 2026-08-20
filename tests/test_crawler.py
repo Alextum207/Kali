@@ -2,7 +2,34 @@ import os
 import pathlib
 import pytest
 from playwright.async_api import async_playwright
-from app.crawler import crawl_page, find_low_contrast_legal_text, apply_consent_rules
+import time
+from app.crawler import (
+    crawl_page,
+    find_low_contrast_legal_text,
+    apply_consent_rules,
+    _snapshot_page,
+    _looks_like_captcha,
+)
+
+
+def test_looks_like_captcha_detects_recaptcha_iframe():
+    dom = '<html><body><iframe src="https://www.google.com/recaptcha/api2/anchor"></iframe></body></html>'
+    assert _looks_like_captcha(dom) is True
+
+
+def test_looks_like_captcha_detects_hcaptcha():
+    dom = '<html><body><div class="h-captcha" data-sitekey="x"></div></body></html>'
+    assert _looks_like_captcha(dom) is True
+
+
+def test_looks_like_captcha_detects_german_challenge_text():
+    dom = "<html><body><p>Bitte bestätigen Sie, dass Sie kein Roboter sind.</p></body></html>"
+    assert _looks_like_captcha(dom) is True
+
+
+def test_looks_like_captcha_returns_false_for_normal_page():
+    dom = "<html><body><h1>Willkommen im Shop</h1><p>Produkte hier.</p></body></html>"
+    assert _looks_like_captcha(dom) is False
 
 FIXTURE_URL = pathlib.Path(__file__).parent.joinpath("fixtures/sample_page.html").as_uri()
 CAMOUFLAGE_FIXTURE_URL = pathlib.Path(__file__).parent.joinpath(
@@ -32,6 +59,25 @@ async def test_crawl_page_captures_dom_change_and_button_styles(tmp_path):
 
     assert isinstance(result["har_path"], str) and result["har_path"]
     assert os.path.exists(result["har_path"])
+
+
+@pytest.mark.asyncio
+async def test_snapshot_page_skip_diff_sleep_skips_the_fixed_wait():
+    """skip_diff_sleep=True (used after a flow-step navigation, where a
+    fresh page already settled its own DOM) must not pay the 1.5s
+    same-page-JS-diff wait that a non-navigating snapshot needs."""
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        page = await browser.new_page()
+        await page.goto(FIXTURE_URL)
+
+        start = time.monotonic()
+        await _snapshot_page(page, skip_diff_sleep=True)
+        elapsed = time.monotonic() - start
+
+        await browser.close()
+
+    assert elapsed < 1.0  # well under the 1.5s fixed sleep it would pay otherwise
 
 
 @pytest.mark.asyncio

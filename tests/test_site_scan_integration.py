@@ -12,6 +12,7 @@ FAKE_SHOP_URL = pathlib.Path(__file__).parent.joinpath("fixtures/fake_shop/index
 class _FakeBlock:
     def __init__(self, text):
         self.text = text
+        self.type = "text"
 
 
 class _FakeMessage:

@@ -313,6 +313,14 @@ Finding-ID (z.B. "Finding #12") und/oder die zitierte Norm nennen, auf der \
 sie beruht. Erfinde keine Funde oder Normen, die nicht im Kontext oder in \
 einem Tool-Ergebnis stehen.
 
+Bekannte Präzedenzfälle zur Einordnung (nicht erschöpfend):
+- LG Berlin II (2025): "Checkout Parkour" + Fake-Countdown + manipulative \
+"No thanks"-Links → Verstoß gegen § 5 UWG und Art. 25 DSA.
+- BGH/EuGH (2020, "Planet49"): vorangekreuzte Checkboxen sind keine \
+wirksame DSGVO-Einwilligung.
+- OLG Köln (2024): "Accept All" sofort sichtbar, "Reject" erst auf zweiter \
+Ebene → unwirksame Einwilligung durch Nudging.
+
 Scan-Kontext:
 {context}
 """

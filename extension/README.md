@@ -15,12 +15,5 @@ aktuell aktiven Tab-URL und übergibt deren Cookies ans Backend
 
 ## Status
 
-- **Backend-Endpoint fehlt noch:** `POST /scans/extension` existiert nicht
-  in `app/main.py`. `background.js` ruft aktuell
-  `http://localhost:8000/scans/extension` als Platzhalter auf und zeigt im
-  Popup einen Fehlerstatus, solange der Endpoint nicht existiert. Siehe
-  TODO-Kommentare in `background.js`/`popup.js` für den erwarteten Contract.
-- **Icons fehlen:** Das Manifest kommt ohne `icons`-Feld aus, Chrome zeigt
-  ein generiertes Platzhalter-Icon. Für ein echtes Icon `icons/`-Ordner mit
-  z.B. `icon16.png`/`icon48.png`/`icon128.png` anlegen und im Manifest unter
-  `"icons"` sowie `action.default_icon` referenzieren.
+- **Backend-Endpoint vorhanden:** `POST /scans/extension` existiert jetzt
+  in `app/main.py`.

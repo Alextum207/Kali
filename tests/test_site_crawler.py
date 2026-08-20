@@ -42,6 +42,7 @@ def test_classify_page_category_falls_back_to_other_without_llm():
 class _FakeBlock:
     def __init__(self, text):
         self.text = text
+        self.type = "text"
 
 
 class _FakeMessage:
@@ -124,7 +125,81 @@ def test_decide_next_interaction_returns_none_on_llm_failure():
 import pathlib
 import pytest
 from playwright.async_api import async_playwright
-from app.site_crawler import crawl_site
+from app.crawler import CaptchaRequiredError
+from app.site_crawler import crawl_site, _chrome_cookies_to_playwright
+
+CAPTCHA_START_URL = pathlib.Path(__file__).parent.joinpath(
+    "fixtures/site_captcha_start/index.html"
+).as_uri()
+CAPTCHA_SUBPAGE_START_URL = pathlib.Path(__file__).parent.joinpath(
+    "fixtures/site_captcha_subpage/index.html"
+).as_uri()
+
+
+@pytest.mark.asyncio
+async def test_crawl_site_raises_when_start_page_looks_like_captcha(tmp_path):
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        try:
+            with pytest.raises(CaptchaRequiredError) as exc_info:
+                await crawl_site(
+                    CAPTCHA_START_URL, browser, max_pages=5, har_dir=str(tmp_path),
+                    url_validator=lambda url: None,
+                )
+        finally:
+            await browser.close()
+
+    assert exc_info.value.url == CAPTCHA_START_URL
+
+
+@pytest.mark.asyncio
+async def test_crawl_site_ignores_captcha_marker_on_a_subpage(tmp_path):
+    """Only the start page is checked — a captcha marker discovered deeper
+    in the crawl doesn't abort the whole scan (that page just fails to load
+    meaningfully like any other unusual page, same as today)."""
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        result = await crawl_site(
+            CAPTCHA_SUBPAGE_START_URL, browser, max_pages=5, har_dir=str(tmp_path),
+            url_validator=lambda url: None,
+        )
+        await browser.close()
+
+    urls = {p["url"] for p in result["pages"]}
+    assert CAPTCHA_SUBPAGE_START_URL in urls
+    assert any("page2.html" in u for u in urls)
+
+
+def test_chrome_cookies_to_playwright_maps_fields():
+    chrome_cookies = [
+        {
+            "name": "session", "value": "abc123", "domain": "example.com", "path": "/app",
+            "secure": True, "httpOnly": True, "sameSite": "lax", "expirationDate": 1999999999.0,
+        },
+        {
+            "name": "temp", "value": "xyz", "domain": "example.com",
+            "session": True, "sameSite": "no_restriction",
+        },
+    ]
+
+    result = _chrome_cookies_to_playwright(chrome_cookies)
+
+    assert result[0] == {
+        "name": "session", "value": "abc123", "domain": "example.com", "path": "/app",
+        "expires": 1999999999.0, "httpOnly": True, "secure": True, "sameSite": "Lax",
+    }
+    # session cookie (no expirationDate, session=True) -> expires -1, defaults filled in
+    assert result[1] == {
+        "name": "temp", "value": "xyz", "domain": "example.com", "path": "/",
+        "expires": -1, "httpOnly": False, "secure": False, "sameSite": "None",
+    }
+
+
+def test_chrome_cookies_to_playwright_maps_unspecified_samesite_to_lax():
+    result = _chrome_cookies_to_playwright(
+        [{"name": "n", "value": "v", "domain": "d", "sameSite": "unspecified"}]
+    )
+    assert result[0]["sameSite"] == "Lax"
 
 TWO_PAGE_SITE_URL = pathlib.Path(__file__).parent.joinpath(
     "fixtures/site_two_pages/index.html"
@@ -161,6 +236,42 @@ async def test_crawl_site_respects_max_pages_limit(tmp_path):
 
     assert len(result["pages"]) == 1
     assert result["pages"][0]["url"] == TWO_PAGE_SITE_URL
+
+
+@pytest.mark.asyncio
+async def test_crawl_site_injects_cookies_before_crawling(tmp_path):
+    """Extension cookie-handoff: cookies (chrome.cookies.getAll() shape) get
+    injected into the context before the first page loads. Domain here is
+    unrelated to the file:// fixture — this only proves add_cookies is
+    called successfully with the converted shape, not that the cookie is
+    actually sent on this particular (file://) navigation."""
+    chrome_cookies = [{"name": "session", "value": "abc", "domain": "example.com", "sameSite": "lax"}]
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        result = await crawl_site(
+            TWO_PAGE_SITE_URL, browser, max_pages=1, har_dir=str(tmp_path),
+            url_validator=lambda url: None, cookies=chrome_cookies,
+        )
+        await browser.close()
+
+    assert len(result["pages"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_crawl_site_stops_discovering_when_time_budget_exceeded(tmp_path):
+    # 1.0s is comfortably longer than browser/context startup (so the start
+    # page is still visited) but shorter than that one page's own processing
+    # time (_snapshot_page's fixed 1.5s dom-diff sleep alone exceeds it), so
+    # the budget check at the top of the *next* iteration stops the crawl.
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        result = await crawl_site(
+            TWO_PAGE_SITE_URL, browser, max_pages=20, har_dir=str(tmp_path),
+            url_validator=lambda url: None, time_budget_seconds=1.0,
+        )
+        await browser.close()
+
+    assert len(result["pages"]) == 1  # only the start page — budget exhausted before discovering more
 
 
 @pytest.mark.asyncio

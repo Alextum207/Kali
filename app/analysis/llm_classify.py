@@ -5,6 +5,8 @@ from pathlib import Path
 
 import anthropic
 
+from app.llm_utils import extract_text
+
 logger = logging.getLogger(__name__)
 
 _EXAMPLES_PATH = Path(__file__).resolve().parents[2] / "data" / "mathur_examples.json"
@@ -41,7 +43,7 @@ def classify_text(text: str, client=None) -> list[dict]:
         system=_build_system_prompt(),
         messages=[{"role": "user", "content": text}],
     )
-    raw = response.content[0].text
+    raw = extract_text(response)
     try:
         items = json.loads(raw)
     except json.JSONDecodeError:

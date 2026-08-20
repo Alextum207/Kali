@@ -26,18 +26,26 @@ async function startScan(url) {
   }
 
   try {
-    // TODO: POST /scans/extension does not exist yet on the backend.
-    // Expected contract (see docs/superpowers/specs/
-    // 2026-08-20-chrome-extension-cookie-handoff-design.md): the server
-    // injects these cookies into a Playwright BrowserContext via
-    // context.add_cookies(...) before running the existing
-    // run_site_scan() pipeline, then returns { scan_id }.
+    // Server injects these cookies into a Playwright BrowserContext via
+    // context.add_cookies(...) before running run_site_scan() — see
+    // docs/superpowers/specs/2026-08-20-chrome-extension-cookie-handoff-design.md.
+    // Returns { scan_id } on success, or 409 { detail: { error:
+    // "captcha_required", url } } if the start page itself is captcha-gated
+    // (only the start page is checked, not pages deeper in the crawl — a
+    // headless mid-crawl captcha can't be solved by the user anyway).
     const response = await fetch(`${BACKEND_BASE_URL}/scans/extension`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ url, cookies }),
     });
 
+    if (response.status === 409) {
+      const data = await response.json();
+      if (data.detail?.error === "captcha_required") {
+        await setStatus({ state: "captcha_required", url, captchaUrl: data.detail.url, error: null, scanId: null });
+        return;
+      }
+    }
     if (!response.ok) {
       throw new Error(`Backend antwortete mit Status ${response.status}`);
     }

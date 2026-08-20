@@ -33,6 +33,60 @@ def map_to_norm(pattern_type: str) -> str:
     return NORM_MAP.get(pattern_type, "Unbekannt")
 
 
+# Quelle: Recherche/Dark Patterns.md (internes Rechts-Sheet). Lokaler
+# Fallback, wenn legal-text-mcp-de keinen Treffer liefert (offline, Norm
+# nicht indexiert) — deckt nur die Normen ab, für die das Sheet Volltext
+# hat (operative Absätze, Boilerplate-Aufzählungen weggelassen); alles
+# andere bleibt auf den Live-Service angewiesen.
+STATUTE_TEXTS: dict[str, str] = {
+    "UWG §§ 5, 5a; Anhang zu § 3 Abs. 3": (
+        "§ 5 UWG (Irreführende geschäftliche Handlungen): "
+        "(1) Unlauter handelt, wer eine irreführende geschäftliche Handlung "
+        "vornimmt, die geeignet ist, den Verbraucher zu einer geschäftlichen "
+        "Entscheidung zu veranlassen, die er andernfalls nicht getroffen "
+        "hätte. (5) Es wird vermutet, dass es irreführend ist, mit der "
+        "Herabsetzung eines Preises zu werben, sofern der Preis nur für eine "
+        "unangemessen kurze Zeit gefordert worden ist.\n"
+        "§ 5a UWG (Irreführung durch Unterlassen): (1) Unlauter handelt "
+        "auch, wer einen Verbraucher irreführt, indem er ihm eine "
+        "wesentliche Information vorenthält, die der Verbraucher benötigt, "
+        "um eine informierte geschäftliche Entscheidung zu treffen. "
+        "(2) Als Vorenthalten gilt auch das Verheimlichen wesentlicher "
+        "Informationen sowie deren unklare, unverständliche oder "
+        "zweideutige Bereitstellung."
+    ),
+    "§ 312j Abs. 3, 4 BGB; Art. 246a EGBGB": (
+        "§ 312j BGB (Besondere Pflichten im elektronischen Geschäftsverkehr "
+        "gegenüber Verbrauchern): (3) Der Unternehmer hat die "
+        "Bestellsituation so zu gestalten, dass der Verbraucher mit seiner "
+        "Bestellung ausdrücklich bestätigt, dass er sich zu einer Zahlung "
+        "verpflichtet. Erfolgt die Bestellung über eine Schaltfläche, ist "
+        "die Pflicht nur erfüllt, wenn diese gut lesbar mit nichts anderem "
+        "als den Wörtern „zahlungspflichtig bestellen“ oder einer "
+        "entsprechend eindeutigen Formulierung beschriftet ist. (4) Ein "
+        "Vertrag nach Absatz 2 kommt nur zustande, wenn der Unternehmer "
+        "seine Pflicht aus Absatz 3 erfüllt. (Art. 246a EGBGB selbst ist im "
+        "Recherche-Sheet nicht im Volltext erfasst.)"
+    ),
+    "Art. 4 Nr. 11, Art. 7 Abs. 4 DSGVO": (
+        "Art. 4 Nr. 11 DSGVO: „Einwilligung“ der betroffenen Person jede "
+        "freiwillig für den bestimmten Fall, in informierter Weise und "
+        "unmissverständlich abgegebene Willensbekundung in Form einer "
+        "Erklärung oder einer sonstigen eindeutigen bestätigenden Handlung, "
+        "mit der die betroffene Person zu verstehen gibt, dass sie mit der "
+        "Verarbeitung der sie betreffenden personenbezogenen Daten "
+        "einverstanden ist.\n"
+        "Art. 7 DSGVO (Bedingungen für die Einwilligung): Die betroffene "
+        "Person hat das Recht, ihre Einwilligung jederzeit zu widerrufen; "
+        "der Widerruf muss so einfach wie die Erteilung sein. Bei der "
+        "Beurteilung, ob die Einwilligung freiwillig erteilt wurde, muss "
+        "berücksichtigt werden, ob die Erfüllung eines Vertrags von einer "
+        "Einwilligung abhängig gemacht wird, die für die Vertragserfüllung "
+        "nicht erforderlich ist (Kopplungsverbot)."
+    ),
+}
+
+
 # Endpoint verified via OpenAPI schema: legal-text-mcp-de HTTP API
 # (uvx legal-text-mcp-de http on http://0.0.0.0:8080)
 # Endpoint: /search (query param, not q; SearchResponse with results array)
@@ -43,8 +97,10 @@ async def fetch_citation(
     norm: str, base_url: str, client: "httpx.AsyncClient | None" = None
 ) -> str | None:
     """Fetches the cite-grade statute text for a norm from legal-text-mcp-de.
-    Returns None (never raises) if the server is unreachable or the norm
-    isn't found — a missing citation must not block report generation."""
+    Falls back to STATUTE_TEXTS (local, only covers a few norms) if the live
+    service is unreachable or has no result — never raises, and only
+    returns None if neither source has anything, so report generation is
+    never blocked."""
     owns_client = client is None
     if owns_client:
         client = httpx.AsyncClient(base_url=base_url, timeout=5.0)
@@ -54,10 +110,11 @@ async def fetch_citation(
         # SearchResponse has { query, results: [...], count, codes }
         # Each result has norm object with text field
         results = response.json().get("results") or []
-        return results[0].get("norm", {}).get("text") if results else None
+        live_text = results[0].get("norm", {}).get("text") if results else None
     except Exception as exc:  # noqa: BLE001 - deliberate broad catch, network call
         logger.warning("legal-text-mcp-de lookup failed for %r: %s", norm, exc)
-        return None
+        live_text = None
     finally:
         if owns_client:
             await client.aclose()
+    return live_text if live_text is not None else STATUTE_TEXTS.get(norm)

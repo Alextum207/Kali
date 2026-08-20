@@ -17,6 +17,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+# This script runs standalone (never imports app.main), so nothing else
+# loads .env for it — app.main.load_dotenv() only helps the actual server.
+from dotenv import load_dotenv
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+
 from app.analysis.llm_classify import classify_text
 
 CSV_PATH = Path(__file__).resolve().parents[1] / "datasets" / "dataset.csv"

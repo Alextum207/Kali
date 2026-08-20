@@ -181,9 +181,10 @@ async def apply_consent_rules(page, rules_dir: str = DEFAULT_CONSENT_RULES_DIR) 
         logger.warning("apply_consent_rules: best-effort pass failed: %s", exc)
 
 
-async def _snapshot_page(page) -> dict:
+async def _snapshot_page(page, skip_diff_sleep: bool = False) -> dict:
     dom_before = await page.content()
-    await asyncio.sleep(1.5)  # Dapde principle: catch script-driven DOM changes
+    if not skip_diff_sleep:
+        await asyncio.sleep(1.5)  # Dapde principle: catch script-driven DOM changes
     dom_after = await page.content()
 
     screenshot = await page.screenshot()
@@ -209,6 +210,32 @@ async def _snapshot_page(page) -> dict:
     }
 
 
+_CAPTCHA_MARKERS = (
+    "recaptcha", "hcaptcha", "h-captcha", "turnstile", "challenges.cloudflare.com",
+    "verify you are human", "bestätigen sie, dass sie kein roboter",
+    "i'm not a robot", "ich bin kein roboter", "checking your browser",
+)
+
+
+def _looks_like_captcha(dom_html: str) -> bool:
+    """Cheap keyword heuristic — good enough to catch the big 3 (reCAPTCHA,
+    hCaptcha, Cloudflare Turnstile) without a DOM-structure parser. Only
+    ever called on the crawl's start page (see crawl_site) — false
+    positives just mean an unnecessary retry-prompt, not a broken crawl."""
+    haystack = dom_html.lower()
+    return any(marker in haystack for marker in _CAPTCHA_MARKERS)
+
+
+class CaptchaRequiredError(Exception):
+    """Raised by crawl_site when the start page itself looks captcha-gated
+    — only a human looking at the real (non-headless) tab can resolve this,
+    so the crawl aborts immediately instead of wasting the scan budget."""
+
+    def __init__(self, url: str):
+        super().__init__(f"Captcha detected on start page: {url}")
+        self.url = url
+
+
 async def crawl_page(
     url: str,
     browser,
@@ -221,7 +248,7 @@ async def crawl_page(
 
     context = await browser.new_context(record_har_path=har_path)
     page = await context.new_page()
-    await page.goto(url)
+    await page.goto(url, wait_until="domcontentloaded")
 
     await apply_consent_rules(page, consent_rules_dir)
 
