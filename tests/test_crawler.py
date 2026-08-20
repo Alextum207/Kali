@@ -2,12 +2,18 @@ import os
 import pathlib
 import pytest
 from playwright.async_api import async_playwright
-from app.crawler import crawl_page, find_low_contrast_legal_text
+from app.crawler import crawl_page, find_low_contrast_legal_text, apply_consent_rules
 
 FIXTURE_URL = pathlib.Path(__file__).parent.joinpath("fixtures/sample_page.html").as_uri()
 CAMOUFLAGE_FIXTURE_URL = pathlib.Path(__file__).parent.joinpath(
     "fixtures/camouflaged_text_page.html"
 ).as_uri()
+REDDIT_CONSENT_FIXTURE_URL = pathlib.Path(__file__).parent.joinpath(
+    "fixtures/reddit_consent_page.html"
+).as_uri()
+REDDIT_RULE_PATH = (
+    pathlib.Path(__file__).parent.parent / "data" / "consent_rules" / "reddit.json"
+)
 
 
 @pytest.mark.asyncio
@@ -40,3 +46,28 @@ async def test_find_low_contrast_legal_text_flags_camouflaged_clause():
     assert len(findings) == 1
     assert findings[0]["pattern_type"] == "Visuelle Tarnung (Kontrast)"
     assert "kündigung" in findings[0]["evidence_data"]["excerpt"].lower()
+
+
+@pytest.mark.asyncio
+async def test_apply_consent_rules_scopes_reddit_rules_bare_button_selector(tmp_path):
+    """Regression test: reddit.json's only actionable rule is a bare "button"
+    selector that only makes sense scoped to its `parent`/`childFilter`
+    (a <section> that also contains the cookie-notice link). Verifies that
+    scoping is reconstructed so (a) the correctly-scoped "Reject
+    non-essential" button is clicked, and (b) an unrelated button elsewhere
+    on the page (e.g. a product page's own "add to cart") is never touched."""
+    rules_dir = tmp_path / "rules"
+    rules_dir.mkdir()
+    (rules_dir / "reddit.json").write_text(REDDIT_RULE_PATH.read_text(encoding="utf-8"), encoding="utf-8")
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        page = await browser.new_page()
+        await page.goto(REDDIT_CONSENT_FIXTURE_URL)
+        await apply_consent_rules(page, str(rules_dir))
+        consent_clicked = await page.evaluate("() => window.__consentClicked")
+        unrelated_clicked = await page.evaluate("() => window.__unrelatedClicked")
+        await browser.close()
+
+    assert consent_clicked == "reject"
+    assert unrelated_clicked is None

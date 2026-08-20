@@ -1,0 +1,13 @@
+<html>
+<body>
+  <!-- unrelated page button, well outside the cookie-notice section — must
+       never be clicked by the reddit.json consent rule -->
+  <button onclick="window.__unrelatedClicked=true">Add to cart</button>
+
+  <section>
+    <a href="https://www.redditinc.com/policies/cookie-notice">Cookie notice</a>
+    <button onclick="window.__consentClicked='accept'">Accept all</button>
+    <button onclick="window.__consentClicked='reject'">Reject non-essential</button>
+  </section>
+</body>
+</html>

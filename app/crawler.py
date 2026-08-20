@@ -63,19 +63,18 @@ async def _read_style(page, selector: str) -> dict | None:
 
 
 def _iter_click_candidates(node):
-    """Walk a Consent-O-Matic rule's action tree, yielding (selector, hint) pairs
-    for anything that looks like a clickable target. Handles both the real
-    upstream shape (action.type == "click", action.target.selector, optional
-    action.target.textFilter) and nested "list"/"foreach" actions."""
+    """Walk a Consent-O-Matic rule's action tree, yielding the full action dict
+    for anything that looks like a clickable target (action.type in ("click",
+    "reject")). Handles both the real upstream shape (action.target.selector,
+    optional action.target.textFilter, optional action.parent scoping) and
+    nested "list"/"foreach" actions. Yielding the whole action (not just a
+    stripped (selector, hint) pair) preserves the `parent`/`childFilter`
+    scoping info so a bare tag-name target isn't clicked page-wide."""
     if isinstance(node, dict):
         action = node.get("action", node)
         a_type = action.get("type") if isinstance(action, dict) else None
-        if a_type in ("click", "reject"):
-            target = action.get("target", {})
-            selector = target.get("selector")
-            hint = target.get("textFilter") or action.get("type")
-            if selector:
-                yield selector, hint
+        if a_type in ("click", "reject") and action.get("target", {}).get("selector"):
+            yield action
         # recurse into nested structures (list/foreach actions, method arrays, etc.)
         for value in node.values():
             yield from _iter_click_candidates(value)
@@ -92,19 +91,51 @@ def _looks_like_reject(hint) -> bool:
     return any(kw in joined for kw in _REJECT_KEYWORDS)
 
 
-# Some Consent-O-Matic rules use a bare tag selector like "button" scoped to
-# a `parent` container (e.g. a <section> containing the cookie-notice link)
-# that _iter_click_candidates doesn't reconstruct — clicking it unscoped
-# would hit the first visible <button>/<a>/... anywhere on the page, which
-# on an ordinary site (e.g. a product page's "add to cart" button) is not a
-# cookie-consent control at all. Refuse to blind-click a selector this
-# generic; only qualified selectors (id/class/attribute) are safe to click
-# without the rule's scoping.
+# A bare tag-name selector like "button" is only safe to click when the
+# rule's own `parent` scoping narrows it to a specific container (e.g.
+# Reddit's rule scopes "button" to the <section> that also contains the
+# cookie-notice link) — clicking it page-wide would hit the first visible
+# <button>/<a>/... anywhere on the page, which on an ordinary site (e.g. a
+# product page's own "add to cart" button) has nothing to do with cookie
+# consent. _scoped_selector reconstructs that `parent`/`childFilter` scoping
+# via Playwright's `:has()` (supported regardless of browser CSS support);
+# only a target with no scoping info at all falls back to being skipped.
 _GENERIC_TAG_SELECTORS = {"a", "button", "div", "span", "input", "section", "p"}
 
 
 def _is_generic_selector(selector: str) -> bool:
     return selector.strip().lower() in _GENERIC_TAG_SELECTORS
+
+
+def _scoped_selector(action: dict) -> str | None:
+    """Returns a CSS selector for an action's click target, narrowed by the
+    rule's `parent`/`childFilter` when present, and by `textFilter` when
+    given (e.g. distinguishing an "Accept all" button from a "Reject
+    non-essential" button that share the same tag/parent — Playwright's
+    `:has-text()` extension does the text match). Returns None if the target
+    is a bare tag name with no parent scoping to narrow it safely."""
+    target = action.get("target", {})
+    selector = target.get("selector")
+    if not selector:
+        return None
+
+    parent = action.get("parent") or {}
+    parent_selector = parent.get("selector")
+    if not parent_selector:
+        base = None if _is_generic_selector(selector) else selector
+    else:
+        child_selector = parent.get("childFilter", {}).get("target", {}).get("selector")
+        scoped_parent = f"{parent_selector}:has({child_selector})" if child_selector else parent_selector
+        base = f"{scoped_parent} {selector}"
+
+    if base is None:
+        return None
+
+    text_filter = target.get("textFilter")
+    if text_filter:
+        text = text_filter[0] if isinstance(text_filter, list) else text_filter
+        base = f'{base}:has-text("{text}")'
+    return base
 
 
 async def apply_consent_rules(page, rules_dir: str = DEFAULT_CONSENT_RULES_DIR) -> None:
@@ -128,10 +159,12 @@ async def apply_consent_rules(page, rules_dir: str = DEFAULT_CONSENT_RULES_DIR) 
                 logger.warning("apply_consent_rules: skipping unparseable %s: %s", rule_file, exc)
                 continue
 
-            for selector, hint in _iter_click_candidates(data):
-                if _is_generic_selector(selector):
-                    continue
+            for action in _iter_click_candidates(data):
+                hint = action.get("target", {}).get("textFilter") or action.get("type")
                 if not _looks_like_reject(hint):
+                    continue
+                selector = _scoped_selector(action)
+                if not selector:
                     continue
                 try:
                     el = await page.query_selector(selector)
