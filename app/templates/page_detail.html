@@ -5,9 +5,17 @@
   <h1>Seite: {{ scan.url }} (Findings dieser Seite)</h1>
   <a href="/scans/{{ scan.id }}">Zurück zur Scan-Übersicht</a>
   <table border="1">
-    <tr><th>Pattern-Typ</th><th>Norm</th><th>Confidence</th></tr>
+    <tr><th>Pattern-Typ</th><th>Norm</th><th>Confidence</th><th>Auswirkung</th><th>Link</th><th>Zeit</th><th>Screenshot</th></tr>
     {% for f in findings %}
-    <tr><td>{{ f.pattern_type }}</td><td>{{ f.target_norm }}</td><td>{{ f.confidence_score }}</td></tr>
+    <tr>
+      <td>{{ f.pattern_type }}</td>
+      <td>{{ f.target_norm }}</td>
+      <td>{{ f.confidence_score }}</td>
+      <td>{{ f.evidence_data.get("impact") or "–" }}</td>
+      <td>{% if f.page_url %}<a href="{{ f.page_url }}" target="_blank">{{ f.page_url }}</a>{% else %}–{% endif %}</td>
+      <td>{{ f.created_at }}</td>
+      <td>{% if f.screenshot_url %}<a href="{{ f.screenshot_url }}" target="_blank">ansehen</a>{% else %}–{% endif %}</td>
+    </tr>
     {% endfor %}
   </table>
 </body>

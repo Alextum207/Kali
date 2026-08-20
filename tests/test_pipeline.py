@@ -43,6 +43,7 @@ async def test_run_analysis_combines_all_stages_with_norms(monkeypatch):
     assert pattern_types == {"Pre-ticked Box", "Confirm Shaming", "Visuelle Asymmetrie (Button)"}
     for f in findings:
         assert f["target_norm"] != "Unbekannt"
+        assert f["evidence_data"]["impact"] != "–"
 
 
 @pytest.mark.asyncio

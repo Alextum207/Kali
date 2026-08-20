@@ -132,6 +132,33 @@ def test_template_does_not_render_none_as_text():
     assert "Only 2 left!" in html
 
 
+def test_template_renders_impact_link_time_screenshot_columns():
+    """Test that the new Auswirkung/Link/Zeit/Screenshot columns render,
+    with a defensive fallback when a field is missing."""
+    from jinja2 import Environment, FileSystemLoader
+    templates_dir = os.path.join(os.path.dirname(__file__), "..", "app", "templates")
+    env = Environment(loader=FileSystemLoader(templates_dir))
+    template = env.get_template("report.html")
+
+    findings = [
+        {"pattern_type": "Confirm Shaming", "target_norm": "Art. 25 DSA", "confidence_score": 0.8,
+         "created_at": "2026-08-20 10:00:00", "page_url": "https://example.com/checkout",
+         "screenshot_url": "/evidence/scan_1_screenshot.png",
+         "evidence_data": {"quote": "No thanks", "impact": "Verbraucher wird emotional zur Zustimmung gedrängt"}},
+        {"pattern_type": "Pre-ticked Box", "target_norm": "Art. 7 Abs. 4 DSGVO", "confidence_score": 0.75,
+         "evidence_data": {"selector": "input[type='checkbox']"}},  # no impact/page_url/screenshot_url/created_at
+    ]
+    html = template.render(url="https://example.com", findings=findings)
+
+    assert "Verbraucher wird emotional zur Zustimmung gedrängt" in html
+    assert "https://example.com/checkout" in html
+    assert "2026-08-20 10:00:00" in html
+    assert "/evidence/scan_1_screenshot.png" in html
+    # Second finding is missing impact/page_url/screenshot_url entirely -
+    # must not crash and must fall back to "–" for impact.
+    assert "–" in html
+
+
 def test_template_handles_missing_citation_key():
     """Test that rendering works when citation key is entirely absent from evidence_data."""
     from jinja2 import Environment, FileSystemLoader

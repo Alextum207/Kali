@@ -4,9 +4,10 @@ from contextlib import asynccontextmanager
 
 import anthropic
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
-from fastapi.responses import RedirectResponse, HTMLResponse, FileResponse
+from fastapi.responses import RedirectResponse, HTMLResponse, FileResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from playwright.async_api import async_playwright
+from pydantic import BaseModel
 
 from app.db import init_db, get_scan, get_findings, get_pages, get_page_findings
 from app.scan import run_site_scan
@@ -60,9 +61,33 @@ def _get_conn():
         conn.close()
 
 
+def _attach_display_fields(findings: list[dict], pages: list[dict], scan_url: str) -> list[dict]:
+    """Adds page_url (via page_id -> pages.url, falling back to the scan's
+    own URL for single-page scans without a page_id) and screenshot_url
+    (served through /evidence/<basename>) to each finding, for the
+    Link/Screenshot columns in scan_detail.html and report.html."""
+    url_by_page_id = {p["id"]: p["url"] for p in pages}
+    for f in findings:
+        f["page_url"] = url_by_page_id.get(f.get("page_id"), scan_url)
+        screenshot_path = f.get("evidence_data", {}).get("screenshot_path")
+        f["screenshot_url"] = f"/evidence/{os.path.basename(screenshot_path)}" if screenshot_path else None
+    return findings
+
+
 @app.get("/", response_class=HTMLResponse)
 def dashboard(request: Request):
     return templates.TemplateResponse(request, "dashboard.html")
+
+
+@app.get("/evidence/{filename}")
+def evidence_file(filename: str):
+    # os.path.basename strips any directory component the client tries to
+    # smuggle in (e.g. "../../secret") — only files directly in EVIDENCE_DIR
+    # are ever served.
+    path = os.path.join(EVIDENCE_DIR, os.path.basename(filename))
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="Evidence file not found")
+    return FileResponse(path)
 
 
 @app.post("/scans")
@@ -88,13 +113,47 @@ async def start_scan(
     return RedirectResponse(url=f"/scans/{scan_id}", status_code=303)
 
 
+class ExtensionScanRequest(BaseModel):
+    url: str
+    cookies: list[dict] = []
+
+
+@app.post("/scans/extension")
+async def start_scan_from_extension(
+    request: Request,
+    body: ExtensionScanRequest,
+    conn: sqlite3.Connection = Depends(_get_conn),
+):
+    """Chrome-Extension cookie-handoff entrypoint — see
+    docs/superpowers/specs/2026-08-20-chrome-extension-cookie-handoff-design.md.
+    Same validation/pipeline as POST /scans, plus cookies (chrome.cookies.
+    getAll() shape) injected into the Playwright context before the crawl,
+    so it continues with the tab's already-authenticated/consent-resolved
+    session. Returns JSON (not a redirect) — the extension's service worker
+    opens the result tab itself."""
+    try:
+        validate_scan_url(body.url)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    scan_id = await run_site_scan(
+        body.url,
+        conn,
+        EVIDENCE_DIR,
+        browser=request.app.state.browser,
+        llm_client=_LLM_CLIENT,
+        cookies=body.cookies,
+    )
+    return JSONResponse({"scan_id": scan_id})
+
+
 @app.get("/scans/{scan_id}", response_class=HTMLResponse)
 def scan_detail(request: Request, scan_id: int, conn: sqlite3.Connection = Depends(_get_conn)):
     scan = get_scan(conn, scan_id)
     if scan is None:
         raise HTTPException(status_code=404, detail="Scan not found")
     pages = get_pages(conn, scan_id)
-    findings = get_findings(conn, scan_id)
+    findings = _attach_display_fields(get_findings(conn, scan_id), pages, scan["url"])
     return templates.TemplateResponse(
         request, "scan_detail.html", {"scan": scan, "pages": pages, "findings": findings}
     )
@@ -105,7 +164,8 @@ def page_detail(request: Request, scan_id: int, page_id: int, conn: sqlite3.Conn
     scan = get_scan(conn, scan_id)
     if scan is None:
         raise HTTPException(status_code=404, detail="Scan not found")
-    findings = get_page_findings(conn, page_id)
+    pages = get_pages(conn, scan_id)
+    findings = _attach_display_fields(get_page_findings(conn, page_id), pages, scan["url"])
     return templates.TemplateResponse(
         request, "page_detail.html", {"scan": scan, "page_id": page_id, "findings": findings}
     )
@@ -122,7 +182,8 @@ def scan_report(scan_id: int, conn: sqlite3.Connection = Depends(_get_conn)):
     scan = get_scan(conn, scan_id)
     if scan is None:
         raise HTTPException(status_code=404, detail="Scan not found")
-    findings = get_findings(conn, scan_id)
+    pages = get_pages(conn, scan_id)
+    findings = _attach_display_fields(get_findings(conn, scan_id), pages, scan["url"])
     out_path = os.path.join(EVIDENCE_DIR, f"scan_{scan_id}_report.pdf")
     generate_pdf_report(scan["url"], findings, out_path)
     return FileResponse(out_path, media_type="application/pdf")

@@ -19,6 +19,31 @@ logger = logging.getLogger(__name__)
 # stacked together signal deliberate intent, not an isolated UX slip).
 _COOCCURRENCE_BOOST = 0.05
 
+# Kurzbeschreibung der Verbraucher-Auswirkung je Pattern-Typ, für die
+# "Auswirkung"-Spalte in Findings-Tabelle/PDF-Report. Fallback "–" in den
+# Templates greift für Findings, die außerhalb dieser Pipeline entstehen
+# (z.B. Kontrast-/Infinite-Scroll-Funde in app/scan.py).
+IMPACT_MAP = {
+    "Fake Urgency": "Verbraucher wird zu überstürzter Kaufentscheidung gedrängt",
+    "Fake Scarcity": "Verbraucher wird zu überstürzter Kaufentscheidung gedrängt",
+    "Fake Social Proof": "Verbraucher wird durch erfundene Nachfrage getäuscht",
+    "Hidden Costs": "Verbraucher zahlt unerwartete Zusatzkosten",
+    "Sneaking / Hidden Costs": "Verbraucher zahlt unerwartete Zusatzkosten",
+    "Confirm Shaming": "Verbraucher wird emotional zur Zustimmung gedrängt",
+    "Visuelle Asymmetrie (Button)": "Verbraucher wird optisch zur gewünschten Wahl gelenkt",
+    "Pre-ticked Box": "Verbraucher willigt ungewollt in Zusatzleistung ein",
+    "Trick Questions": "Verbraucher verwechselt Zustimmung und Ablehnung",
+    "Forced Continuity": "Verbraucher zahlt unbemerkt für Vertragsverlängerung",
+    "Decoy Pricing": "Verbraucher wird zu teurerer Option gelenkt",
+    "Nagging": "Verbraucher wird wiederholt zu einer Handlung gedrängt",
+    "Roach Motel": "Verbraucher findet keinen einfachen Ausstieg (z.B. Kündigung)",
+    "Forced Path": "Verbraucher muss unnötige Zwischenschritte durchlaufen",
+    "Exploiting Addiction (Autoplay)": "Verbraucher wird unfreiwillig länger gebunden",
+    "Exploiting Addiction (Infinite Scroll)": "Verbraucher wird unfreiwillig länger gebunden",
+    "Verständnis-Barriere (Sprachkomplexität)": "Verbraucher versteht rechtlich relevante Klauseln nicht",
+    "Visuelle Tarnung (Kontrast)": "Verbraucher übersieht rechtlich relevante Informationen",
+}
+
 
 async def run_analysis(
     dom_html: str, button_styles: dict | None, llm_client=None, page=None
@@ -63,5 +88,6 @@ async def run_analysis(
 
     for f in findings:
         f["target_norm"] = map_to_norm(f["pattern_type"])
+        f["evidence_data"]["impact"] = IMPACT_MAP.get(f["pattern_type"], "–")
 
     return findings

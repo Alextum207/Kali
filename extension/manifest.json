@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "Kali – Dark-Pattern-Monitor",
+  "version": "0.1.0",
+  "description": "Startet einen Kali-Scan der aktiven Seite und übergibt deren Cookies (Login-/Consent-Zustand) an das Backend.",
+  "permissions": ["cookies", "activeTab", "storage", "scripting"],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html"
+  }
+}

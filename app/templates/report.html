@@ -19,6 +19,10 @@
       <th>Pattern-Typ</th>
       <th>Rechtsnorm</th>
       <th>Confidence</th>
+      <th>Auswirkung</th>
+      <th>Link</th>
+      <th>Zeit</th>
+      <th>Screenshot</th>
       <th>Beleg</th>
     </tr>
     {% for f in findings %}
@@ -26,6 +30,10 @@
       <td>{{ f.pattern_type }}</td>
       <td>{{ f.target_norm }}</td>
       <td>{{ "%.2f"|format(f.confidence_score) }}</td>
+      <td>{{ f.evidence_data.get("impact") or "–" }}</td>
+      <td>{{ f.page_url or "–" }}</td>
+      <td>{{ f.created_at }}</td>
+      <td>{{ f.screenshot_url or "–" }}</td>
       <td>
         <div class="evidence">
           {{ f.evidence_data.get("quote") or f.evidence_data.get("selector") or "" }}
