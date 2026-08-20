@@ -8,11 +8,22 @@ def test_map_known_patterns():
     assert map_to_norm("Confirm Shaming") == "Art. 25 DSA"
     assert map_to_norm("Pre-ticked Box") == "Art. 4 Nr. 11, Art. 7 Abs. 4 DSGVO"
     assert map_to_norm("Hidden Costs") == "§ 312j Abs. 3, 4 BGB; Art. 246a EGBGB"
-    assert map_to_norm("Preisaufschlag") == "PAngV"
 
 
 def test_map_unknown_pattern_returns_placeholder():
     assert map_to_norm("Something Weird") == "Unbekannt"
+
+
+def test_map_removed_dead_entries_returns_placeholder():
+    """These 4 NORM_MAP entries were never referenced by any finding
+    producer (LLM prompt or heuristics) — removed as dead weight."""
+    for pattern_type in [
+        "Unklare Button-Beschriftung",
+        "Obstruction",
+        "Verdeckter Opt-out",
+        "Preisaufschlag",
+    ]:
+        assert map_to_norm(pattern_type) == "Unbekannt"
 
 
 def test_llm_prompt_pattern_types_all_resolve_to_a_norm():
