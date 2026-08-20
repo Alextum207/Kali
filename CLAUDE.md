@@ -35,22 +35,42 @@ Jeder Fund soll folgende Datenstruktur haben: `pattern_type`, `target_norm`,
   `checkout_payment`, `account_subscription`, `product_category` werden vor
   generischen Seiten besucht) und flow-getriebenem Mehrschritt-Walk
   (`_walk_category_flow`, LLM-gesteuertes Durchklicken bis Flow-Ende statt
-  fixer Seitenzahl pro Kategorie, Notbremse `MAX_FLOW_STEPS`).
+  fixer Seitenzahl pro Kategorie, Notbremse `MAX_FLOW_STEPS`). Alle
+  LLM-Aufrufe im Crawl-Pfad sind echt async (`AsyncAnthropic`, kein
+  blockierender Call mehr im Event-Loop); `classify_page_category`
+  (Routing-Entscheidung, nicht die Findings selbst) ist Content-Hash-
+  gecacht (`_CATEGORY_CACHE`, TTL via `CATEGORY_CACHE_TTL_SECONDS`) — siehe
+  `docs/superpowers/plans/2026-08-20-...-lighthouse.md`-Pendant unter
+  `~/.claude/plans/` für den Speed/Qualitäts-Umbau, aktuell in Arbeit auf
+  `feat/speed-quality-overhaul`. `app/url_safety.py` validiert jede
+  Scan-Ziel-URL serverseitig gegen SSRF (private IPs, Cloud-Metadata,
+  `file://`) bevor sie an Playwright geht.
 - **Modul B – Visuelle/Layout-Analyse** (`app/analysis/visual.py`,
   `app/analysis/heuristics.py`): Kontrastberechnung, Button-Style-Vergleich,
   Trick-Questions/Autoplay/Low-Contrast-Legal-Text-Heuristiken.
 - **Modul C – Beweissicherung** (`app/evidence.py`): Screenshot/DOM-Hashing
   (SHA-256), RFC-3161-Zeitstempel (best-effort), HAR-Aufzeichnung pro Scan.
+  Caching ist bewusst nur für Crawl-Routing erlaubt (Modul A), nie für
+  Findings — sonst würde ein Report scan-übergreifend veraltete Daten als
+  "gefunden am Datum X" ausgeben.
 - **Modul D – Compliance-Engine & Reports** (`app/compliance.py`,
   `app/reports.py`): Fund → Rechtsnorm-Mapping (`NORM_MAP`), Anbindung an
   `legal-text-mcp-de`, PDF-Report via WeasyPrint (braucht GTK — auf Windows
   ohne GTK fällt die Testsuite auf einen Mock zurück, siehe
-  `tests/conftest.py`).
+  `tests/conftest.py`). Report hat eine gerichtsfeste Deckblatt-Seite
+  (Risk-Score/-Badge, Norm-Zusammenfassung) vor der Fund-Tabelle.
 - Dazu: `app/analysis/llm_classify.py` (Claude-Textklassifikator für
   Dark-Pattern-Sprache), `app/analysis/pipeline.py` (`run_analysis`,
   bündelt alle Erkennungsstufen inkl. Confidence-Boost bei Mehrfachfunden),
-  `app/db.py` (SQLite-Schema: `scans`, `pages`, `findings`), `app/main.py`
-  (FastAPI: Dashboard, `POST /scans` startet Site-Scan, PDF-Report-Route).
+  `app/llm_utils.py` (`extract_text` — robustes Auslesen des ersten
+  Text-Blocks einer Messages-API-Response, ThinkingBlock-sicher), `app/db.py`
+  (SQLite-Schema: `scans`, `pages`, `findings`), `app/main.py` (FastAPI:
+  Dashboard = Scan-Übersicht mit Risk-Badges (`aggregate_risk_score`,
+  `list_scans`), Scan-Detail mit serverseitigen Fund-Filtern, Page-Detail,
+  `POST /scans` startet Site-Scan, PDF-Report-Route). Web-App-first
+  (Chrome-Extension wurde entfernt, siehe Kontext oben) mit gemeinsamem
+  Design-System (`static/style.css` + `app/templates/base.html`, von allen
+  Templates geteilt).
 
 Architektur-Leitplanke laut Vorgabe: strikte Entkopplung von
 Scraper/Analyse-Engine/DB/Reporting; robuste Erkennung über berechnete visuelle
@@ -85,3 +105,15 @@ Crawl-Priorisierung, WeasyPrint/GTK unter Windows) als im Grundgerüst — vor
 größeren Architekturänderungen trotzdem kurz mit dem Nutzer abstimmen
 (siehe `superpowers:brainstorming`-Workflow, wurde bisher für Feature-Design
 genutzt, z.B. `docs/superpowers/specs/2026-08-19-site-crawl-category-agents-design.md`).
+
+**Laufender Umbau (Stand 2026-08-21):** Speed/Qualitäts-Überholung des
+Crawlers/der Analyse läuft auf `feat/speed-quality-overhaul`
+(Worktree `.worktrees/speed-quality-overhaul`), Plan-Mode-Doc unter
+`~/.claude/plans/funktioniert-es-jetzt-besser-replicated-lighthouse.md`
+(nicht im Repo — Nutzer-Home, nicht projekteigen), ausgeführt per
+`superpowers:subagent-driven-development`. Fortschritts-Ledger:
+`.superpowers/sdd/funktioniert-es-jetzt-besser-replicated-lighthouse/progress.md`
+in diesem Worktree (git-ignored). Bisher fertig: Phase 1 (Async-LLM),
+Phase 3 (Routing-Cache), Phase 2 (Time-Budget im Flow-Walk). Offen:
+Phase 4 (Erkennungsqualität — Schema-Zwang, Retry, Confidence-Clamp,
+Truncation-/Priorisierungs-Fixes) und Phase 5 (Doku/Kalibrierung).
