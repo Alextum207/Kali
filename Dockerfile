@@ -29,4 +29,9 @@ ENV DB_PATH=/var/data/monitor.db
 ENV EVIDENCE_DIR=/var/data/evidence
 
 EXPOSE 8000
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Shell form (not exec-form JSON array) so $PORT actually expands — Render
+# assigns a dynamic port via this env var and routes its proxy there; a
+# hardcoded --port 8000 works locally but causes 502 Bad Gateway on Render
+# since its edge can't reach whatever port the container really bound to.
+# ${PORT:-8000} falls back to 8000 for local `docker run` (no PORT set).
+CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
