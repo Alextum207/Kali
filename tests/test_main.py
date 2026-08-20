@@ -49,6 +49,46 @@ def test_start_scan_accepts_optional_max_pages_field(tmp_path, monkeypatch):
     assert received["max_pages"] == 3
 
 
+def test_start_scan_passes_llm_client_when_api_key_set(tmp_path, monkeypatch):
+    monkeypatch.setattr(main_module, "DB_PATH", str(tmp_path / "test.db"))
+    monkeypatch.setattr(main_module, "EVIDENCE_DIR", str(tmp_path / "evidence"))
+    monkeypatch.setattr(main_module, "_LLM_CLIENT", "fake-client")
+
+    received = {}
+
+    async def fake_run_site_scan(url, conn, evidence_dir, browser=None, max_pages=None, llm_client=None):
+        received["llm_client"] = llm_client
+        from app.db import insert_scan
+        return insert_scan(conn, url)
+
+    monkeypatch.setattr(main_module, "run_site_scan", fake_run_site_scan)
+
+    with TestClient(main_module.app) as client:
+        client.post("/scans", data={"url": "https://example.com"}, follow_redirects=False)
+
+    assert received["llm_client"] == "fake-client"
+
+
+def test_start_scan_llm_client_none_without_api_key(tmp_path, monkeypatch):
+    monkeypatch.setattr(main_module, "DB_PATH", str(tmp_path / "test.db"))
+    monkeypatch.setattr(main_module, "EVIDENCE_DIR", str(tmp_path / "evidence"))
+    monkeypatch.setattr(main_module, "_LLM_CLIENT", None)
+
+    received = {}
+
+    async def fake_run_site_scan(url, conn, evidence_dir, browser=None, max_pages=None, llm_client=None):
+        received["llm_client"] = llm_client
+        from app.db import insert_scan
+        return insert_scan(conn, url)
+
+    monkeypatch.setattr(main_module, "run_site_scan", fake_run_site_scan)
+
+    with TestClient(main_module.app) as client:
+        client.post("/scans", data={"url": "https://example.com"}, follow_redirects=False)
+
+    assert received["llm_client"] is None
+
+
 def test_dashboard_renders():
     with TestClient(main_module.app) as client:
         response = client.get("/")

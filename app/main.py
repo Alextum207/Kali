@@ -2,6 +2,7 @@ import os
 import sqlite3
 from contextlib import asynccontextmanager
 
+import anthropic
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse, HTMLResponse, FileResponse
 from fastapi.templating import Jinja2Templates
@@ -13,6 +14,15 @@ from app.url_safety import validate_scan_url
 
 DB_PATH = os.environ.get("DB_PATH", "./data/monitor.db")
 EVIDENCE_DIR = os.environ.get("EVIDENCE_DIR", "./data/evidence")
+
+# Same "construct only if key present" pattern as classify_text's fallback
+# in app/analysis/llm_classify.py. None here means local dev/CI without the
+# key keeps working exactly as before (category/interaction LLM steps no-op).
+_LLM_CLIENT = (
+    anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+    if os.environ.get("ANTHROPIC_API_KEY")
+    else None
+)
 
 
 @asynccontextmanager
@@ -68,7 +78,12 @@ async def start_scan(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     scan_id = await run_site_scan(
-        url, conn, EVIDENCE_DIR, browser=request.app.state.browser, max_pages=max_pages
+        url,
+        conn,
+        EVIDENCE_DIR,
+        browser=request.app.state.browser,
+        max_pages=max_pages,
+        llm_client=_LLM_CLIENT,
     )
     return RedirectResponse(url=f"/scans/{scan_id}", status_code=303)
 
