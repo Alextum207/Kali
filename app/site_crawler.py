@@ -221,7 +221,13 @@ async def _check_infinite_scroll(page) -> bool:
 
 
 async def _walk_category_flow(
-    page, category: str, snapshot: dict, llm_client=None, max_extra_pages: int = 0
+    page,
+    category: str,
+    snapshot: dict,
+    llm_client=None,
+    max_extra_pages: int = 0,
+    start_time: float | None = None,
+    time_budget_seconds: float | None = None,
 ) -> tuple[dict, list[dict]]:
     """Repeats decide_next_interaction + click for the page's category
     (checkout, cancellation, product, popup, ...) until the flow's own goal
@@ -230,12 +236,23 @@ async def _walk_category_flow(
     of a fixed number of pages per category, which doesn't fit flows of
     very different natural length (a cookie banner vs. a 4-step checkout).
 
+    start_time/time_budget_seconds (both optional, same contract as
+    crawl_site's) let this loop stop starting new steps once the overall
+    crawl budget is exhausted — checked once per iteration, not preemptive,
+    so a click/sleep/snapshot already in flight still runs to completion.
+
     Returns the (possibly updated, if the last step didn't navigate) snapshot
     for the page that was already appended by the caller, plus a list of
     additional page dicts for every step that navigated to a new URL."""
     extra_pages: list[dict] = []
     for _ in range(MAX_FLOW_STEPS):
         if len(extra_pages) >= max_extra_pages:
+            break
+        if (
+            start_time is not None
+            and time_budget_seconds is not None
+            and time.monotonic() - start_time >= time_budget_seconds
+        ):
             break
         clickable = await _extract_clickable_elements(page)
         interaction = await decide_next_interaction(category, clickable, llm_client=llm_client)
@@ -368,7 +385,13 @@ async def crawl_site(
             # (checkout, cancellation, ...) until it's done, not a fixed page
             # count — see _walk_category_flow docstring.
             updated_snapshot, flow_pages = await _walk_category_flow(
-                page, category, snapshot, llm_client=llm_client, max_extra_pages=max_pages - len(pages)
+                page,
+                category,
+                snapshot,
+                llm_client=llm_client,
+                max_extra_pages=max_pages - len(pages),
+                start_time=start_time,
+                time_budget_seconds=time_budget_seconds,
             )
             initial_page["dom_after"] = updated_snapshot["dom_after"]
             initial_page["screenshot"] = updated_snapshot["screenshot"]

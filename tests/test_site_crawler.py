@@ -421,3 +421,26 @@ async def test_crawl_site_flow_has_a_safety_cap_against_loops(tmp_path):
 
     assert len(result["pages"]) <= MAX_FLOW_STEPS + 1
     assert len(result["pages"]) < 20  # proves the cap fired, not max_pages
+
+
+@pytest.mark.asyncio
+async def test_crawl_site_flow_walk_stops_early_when_time_budget_exhausted(tmp_path):
+    # Same infinite-loop fixture/client as the MAX_FLOW_STEPS safety-cap test
+    # above, which — without a time budget — produces MAX_FLOW_STEPS extra
+    # pages (<= MAX_FLOW_STEPS + 1 total). Here a 1.0s budget is comfortably
+    # shorter than the first page's own processing time (_snapshot_page's
+    # fixed 1.5s dom-diff sleep alone exceeds it, same reasoning as
+    # test_crawl_site_stops_discovering_when_time_budget_exceeded), so by the
+    # time _walk_category_flow's loop starts the budget is already exhausted
+    # and it must stop before taking a single flow step.
+    client = _FakeClient('{"type": "click", "target": "a#next"}')
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        result = await crawl_site(
+            FLOW_LOOP_URL, browser, max_pages=20, har_dir=str(tmp_path),
+            llm_client=client, url_validator=lambda url: None,
+            time_budget_seconds=1.0,
+        )
+        await browser.close()
+
+    assert len(result["pages"]) == 1  # only the start page — no flow step got to run
