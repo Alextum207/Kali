@@ -97,7 +97,13 @@ def _predict_category_from_url(url: str) -> str:
 async def _llm_classify_category(url: str, dom_html: str, client) -> str:
     import re
 
-    text_sample = re.sub(r"<[^>]+>", " ", dom_html)[:1500]
+    soup = BeautifulSoup(dom_html, "html.parser")
+    main_content = soup.find("main") or soup.find("article")
+    # ponytail: best-effort <main>/<article> detection only, not full
+    # boilerplate-stripping — pages without either tag fall back to
+    # whole-page truncation as before; upgrade if that proves insufficient.
+    source_html = str(main_content) if main_content else dom_html
+    text_sample = re.sub(r"<[^>]+>", " ", source_html)[:1500]
     prompt = (
         "Klassifiziere folgende Webseite in genau eine Kategorie: "
         "cookie_consent, checkout_payment, product_category, account_subscription, "
@@ -140,6 +146,25 @@ async def classify_page_category(url: str, dom_html: str, llm_client=None) -> st
     return "other"
 
 
+# Keywords for flow-critical actions (cancel/checkout/cart) — used to
+# reorder clickable elements so these survive decide_next_interaction's
+# [:40] cap even when they sit deep in DOM order (e.g. behind a long nav).
+_INTERACTION_KEYWORDS = (
+    "kündig", "abbrechen", "zur kasse", "warenkorb", "bestellen", "checkout",
+)
+
+
+def _sort_by_interaction_keywords(elements: list[dict]) -> list[dict]:
+    """Stable-sorts clickable elements, keyword matches first, so the real
+    'Kündigen'/'Zur Kasse' button isn't dropped by the [:40] cap just
+    because nav/footer links precede it in DOM order."""
+    def relevance(el: dict) -> int:
+        text = el.get("text", "").lower()
+        return 0 if any(kw in text for kw in _INTERACTION_KEYWORDS) else 1
+
+    return sorted(elements, key=relevance)
+
+
 # One-line navigation goal per category; categories not listed here (or
 # mapped to None) get no LLM-driven interaction — cookie_consent is already
 # handled by apply_consent_rules, "other" has no specific journey to drive.
@@ -163,8 +188,9 @@ async def decide_next_interaction(category: str, clickable_elements: list[dict],
     if not goal or not clickable_elements or llm_client is None:
         return None
 
+    sorted_elements = _sort_by_interaction_keywords(clickable_elements)
     elements_text = "\n".join(
-        f'- "{el["text"]}" (selector: {el["selector"]})' for el in clickable_elements[:40]
+        f'- "{el["text"]}" (selector: {el["selector"]})' for el in sorted_elements[:40]
     )
     prompt = (
         f"Ziel: {goal}\n\n"
@@ -192,7 +218,7 @@ async def _extract_clickable_elements(page) -> list[dict]:
     try:
         elements = await page.eval_on_selector_all(
             "a, button",
-            """els => els.slice(0, 60).map(el => ({
+            """els => els.slice(0, 200).map(el => ({
                 text: (el.textContent || el.value || '').trim().slice(0, 80),
                 selector: el.tagName.toLowerCase() + (el.id ? '#' + el.id : ''),
             })).filter(e => e.text.length > 0)""",

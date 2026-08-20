@@ -187,6 +187,83 @@ async def test_decide_next_interaction_returns_none_on_llm_failure():
     assert result is None
 
 
+# --- L: <main>/<article>-preferred truncation window for category classification ---
+
+from app.site_crawler import _llm_classify_category
+
+
+class _CapturingMessages:
+    def __init__(self, response_text):
+        self._response_text = response_text
+        self.last_prompt = None
+
+    async def create(self, **kwargs):
+        self.last_prompt = kwargs["messages"][0]["content"]
+        return _FakeMessage(self._response_text)
+
+
+class _CapturingClient:
+    def __init__(self, response_text):
+        self.messages = _CapturingMessages(response_text)
+
+
+@pytest.mark.asyncio
+async def test_llm_classify_category_prefers_main_content_over_nav_preamble():
+    nav_preamble = "<nav>" + ("Startseite Kategorien Angebote " * 200) + "</nav>"
+    dom = f"<html><body>{nav_preamble}<main><h1>Kündigen</h1><p>Preistabelle: 9,99 EUR</p></main></body></html>"
+    client = _CapturingClient("account_subscription")
+
+    await _llm_classify_category("https://shop.example.com/x", dom, client)
+
+    assert "Preistabelle" in client.messages.last_prompt
+    assert "Kündigen" in client.messages.last_prompt
+    assert "Startseite Kategorien Angebote" not in client.messages.last_prompt
+
+
+@pytest.mark.asyncio
+async def test_llm_classify_category_falls_back_to_whole_page_truncation_without_main():
+    dom = "<html><body><div>" + ("Startseite " * 300) + "<p>Preistabelle: 9,99 EUR</p></div></body></html>"
+    client = _CapturingClient("other")
+
+    await _llm_classify_category("https://shop.example.com/x", dom, client)
+
+    # No <main>/<article> present: old behavior (first 1500 chars of the
+    # whole page) applies, so the late content never makes it into the sample.
+    assert "Startseite" in client.messages.last_prompt
+    assert "Preistabelle" not in client.messages.last_prompt
+
+
+# --- M: keyword-priority sort of clickable elements before the [:40] cap ---
+
+
+@pytest.mark.asyncio
+async def test_decide_next_interaction_finds_keyword_element_past_position_40():
+    # "Kündigen" sits at index 45 — past decide_next_interaction's [:40] cap
+    # in DOM order — but must survive the keyword pre-sort into the prompt.
+    filler = [{"text": f"Link {i}", "selector": f"a#link{i}"} for i in range(45)]
+    elements = filler + [{"text": "Kündigen", "selector": "button#cancel"}]
+
+    client = _CapturingClient('{"type": "click", "target": "button#cancel"}')
+    result = await decide_next_interaction("account_subscription", elements, llm_client=client)
+
+    assert "Kündigen" in client.messages.last_prompt
+    assert result == {"type": "click", "target": "button#cancel"}
+
+
+def test_sort_by_interaction_keywords_is_stable_for_non_matches():
+    from app.site_crawler import _sort_by_interaction_keywords
+
+    elements = [
+        {"text": "Startseite", "selector": "a#home"},
+        {"text": "Jetzt zur Kasse", "selector": "a#checkout"},
+        {"text": "Impressum", "selector": "a#imprint"},
+    ]
+    result = _sort_by_interaction_keywords(elements)
+    assert result[0]["selector"] == "a#checkout"
+    # non-matching elements keep their relative order
+    assert [e["selector"] for e in result[1:]] == ["a#home", "a#imprint"]
+
+
 import pathlib
 from playwright.async_api import async_playwright
 from app.crawler import CaptchaRequiredError
