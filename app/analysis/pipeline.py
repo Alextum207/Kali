@@ -57,7 +57,7 @@ async def run_analysis(
 
     main_text = extract_main_text(dom_html)
     try:
-        findings.extend(classify_text(main_text, client=llm_client))
+        findings.extend(await classify_text(main_text, client=llm_client))
     except Exception as exc:  # noqa: BLE001 - deliberate broad catch, LLM call
         logger.warning("classify_text failed, continuing without LLM findings: %s", exc)
 

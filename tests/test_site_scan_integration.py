@@ -27,7 +27,7 @@ class _StubLLMClient:
 
     class messages:
         @staticmethod
-        def create(**kwargs):
+        async def create(**kwargs):
             prompt_text = str(kwargs.get("messages", [{}])[0].get("content", ""))
             if "AUSSCHLIESSLICH mit einem JSON-Objekt" in prompt_text:
                 return _FakeMessage('{"type": "none"}')

@@ -18,7 +18,7 @@ TRICK_QUESTION_DOM = """
 """
 
 
-def _fake_classify_text(text, client=None):
+async def _fake_classify_text(text, client=None):
     return [
         {
             "pattern_type": "Confirm Shaming",
@@ -56,7 +56,10 @@ async def test_run_analysis_without_button_styles_skips_visual_stage(monkeypatch
 
 @pytest.mark.asyncio
 async def test_run_analysis_finds_trick_questions(monkeypatch):
-    monkeypatch.setattr("app.analysis.pipeline.classify_text", lambda text, client=None: [])
+    async def _empty_classify_text(text, client=None):
+        return []
+
+    monkeypatch.setattr("app.analysis.pipeline.classify_text", _empty_classify_text)
     findings = await run_analysis(TRICK_QUESTION_DOM, None)
     assert any(f["pattern_type"] == "Trick Questions" for f in findings)
 
@@ -75,7 +78,10 @@ async def test_run_analysis_boosts_confidence_when_multiple_pattern_types_cooccu
 
 @pytest.mark.asyncio
 async def test_run_analysis_skips_page_dependent_checks_without_page(monkeypatch):
-    monkeypatch.setattr("app.analysis.pipeline.classify_text", lambda text, client=None: [])
+    async def _empty_classify_text(text, client=None):
+        return []
+
+    monkeypatch.setattr("app.analysis.pipeline.classify_text", _empty_classify_text)
     # Must not raise even though page=None - find_low_contrast_legal_text is
     # page-dependent and simply skipped when no page object is provided.
     findings = await run_analysis(DOM_HTML, None, page=None)

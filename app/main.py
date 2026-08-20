@@ -30,7 +30,7 @@ EVIDENCE_DIR = os.environ.get("EVIDENCE_DIR", "./data/evidence")
 # in app/analysis/llm_classify.py. None here means local dev/CI without the
 # key keeps working exactly as before (category/interaction LLM steps no-op).
 _LLM_CLIENT = (
-    anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+    anthropic.AsyncAnthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
     if os.environ.get("ANTHROPIC_API_KEY")
     else None
 )

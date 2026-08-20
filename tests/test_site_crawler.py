@@ -1,3 +1,5 @@
+import pytest
+
 from app.site_crawler import discover_links
 
 DOM_WITH_LINKS = """
@@ -29,14 +31,16 @@ def test_discover_links_dedupes():
 from app.site_crawler import classify_page_category
 
 
-def test_classify_page_category_by_url_keyword():
-    assert classify_page_category("https://shop.example.com/checkout", "<h1>Kasse</h1>") == "checkout_payment"
-    assert classify_page_category("https://shop.example.com/konto/abo", "<h1>Mein Abo</h1>") == "account_subscription"
-    assert classify_page_category("https://shop.example.com/p/sneaker-123", "<h1>Sneaker</h1>") == "product_category"
+@pytest.mark.asyncio
+async def test_classify_page_category_by_url_keyword():
+    assert await classify_page_category("https://shop.example.com/checkout", "<h1>Kasse</h1>") == "checkout_payment"
+    assert await classify_page_category("https://shop.example.com/konto/abo", "<h1>Mein Abo</h1>") == "account_subscription"
+    assert await classify_page_category("https://shop.example.com/p/sneaker-123", "<h1>Sneaker</h1>") == "product_category"
 
 
-def test_classify_page_category_falls_back_to_other_without_llm():
-    assert classify_page_category("https://shop.example.com/about-us", "<h1>Über uns</h1>") == "other"
+@pytest.mark.asyncio
+async def test_classify_page_category_falls_back_to_other_without_llm():
+    assert await classify_page_category("https://shop.example.com/about-us", "<h1>Über uns</h1>") == "other"
 
 
 class _FakeBlock:
@@ -54,7 +58,7 @@ class _FakeMessages:
     def __init__(self, response_text):
         self._response_text = response_text
 
-    def create(self, **kwargs):
+    async def create(self, **kwargs):
         return _FakeMessage(self._response_text)
 
 
@@ -63,20 +67,22 @@ class _FakeClient:
         self.messages = _FakeMessages(response_text)
 
 
-def test_classify_page_category_uses_llm_fallback_for_ambiguous_pages():
+@pytest.mark.asyncio
+async def test_classify_page_category_uses_llm_fallback_for_ambiguous_pages():
     client = _FakeClient("popup_leadform")
-    result = classify_page_category("https://shop.example.com/about-us", "<h1>Über uns</h1>", llm_client=client)
+    result = await classify_page_category("https://shop.example.com/about-us", "<h1>Über uns</h1>", llm_client=client)
     assert result == "popup_leadform"
 
 
-def test_classify_page_category_llm_failure_falls_back_to_other():
+@pytest.mark.asyncio
+async def test_classify_page_category_llm_failure_falls_back_to_other():
     class _BrokenClient:
         class messages:
             @staticmethod
-            def create(**kwargs):
+            async def create(**kwargs):
                 raise RuntimeError("API down")
 
-    result = classify_page_category("https://shop.example.com/about-us", "<h1>Über uns</h1>", llm_client=_BrokenClient())
+    result = await classify_page_category("https://shop.example.com/about-us", "<h1>Über uns</h1>", llm_client=_BrokenClient())
     assert result == "other"
 
 
@@ -89,41 +95,45 @@ CLICKABLE_ELEMENTS = [
 ]
 
 
-def test_decide_next_interaction_returns_llm_choice_for_relevant_category():
+@pytest.mark.asyncio
+async def test_decide_next_interaction_returns_llm_choice_for_relevant_category():
     client = _FakeClient('{"type": "click", "target": "button#add-to-cart"}')
-    result = decide_next_interaction("product_category", CLICKABLE_ELEMENTS, llm_client=client)
+    result = await decide_next_interaction("product_category", CLICKABLE_ELEMENTS, llm_client=client)
     assert result == {"type": "click", "target": "button#add-to-cart"}
 
 
-def test_decide_next_interaction_returns_none_when_llm_says_none():
+@pytest.mark.asyncio
+async def test_decide_next_interaction_returns_none_when_llm_says_none():
     client = _FakeClient('{"type": "none"}')
-    result = decide_next_interaction("product_category", CLICKABLE_ELEMENTS, llm_client=client)
+    result = await decide_next_interaction("product_category", CLICKABLE_ELEMENTS, llm_client=client)
     assert result is None
 
 
-def test_decide_next_interaction_returns_none_without_llm_client():
-    assert decide_next_interaction("product_category", CLICKABLE_ELEMENTS, llm_client=None) is None
+@pytest.mark.asyncio
+async def test_decide_next_interaction_returns_none_without_llm_client():
+    assert await decide_next_interaction("product_category", CLICKABLE_ELEMENTS, llm_client=None) is None
 
 
-def test_decide_next_interaction_returns_none_for_categories_without_a_goal():
+@pytest.mark.asyncio
+async def test_decide_next_interaction_returns_none_for_categories_without_a_goal():
     client = _FakeClient('{"type": "click", "target": "button#add-to-cart"}')
-    assert decide_next_interaction("cookie_consent", CLICKABLE_ELEMENTS, llm_client=client) is None
-    assert decide_next_interaction("other", CLICKABLE_ELEMENTS, llm_client=client) is None
+    assert await decide_next_interaction("cookie_consent", CLICKABLE_ELEMENTS, llm_client=client) is None
+    assert await decide_next_interaction("other", CLICKABLE_ELEMENTS, llm_client=client) is None
 
 
-def test_decide_next_interaction_returns_none_on_llm_failure():
+@pytest.mark.asyncio
+async def test_decide_next_interaction_returns_none_on_llm_failure():
     class _BrokenClient:
         class messages:
             @staticmethod
-            def create(**kwargs):
+            async def create(**kwargs):
                 raise RuntimeError("API down")
 
-    result = decide_next_interaction("product_category", CLICKABLE_ELEMENTS, llm_client=_BrokenClient())
+    result = await decide_next_interaction("product_category", CLICKABLE_ELEMENTS, llm_client=_BrokenClient())
     assert result is None
 
 
 import pathlib
-import pytest
 from playwright.async_api import async_playwright
 from app.crawler import CaptchaRequiredError
 from app.site_crawler import crawl_site
@@ -274,7 +284,7 @@ class _SequentialFakeClient:
         def __init__(self, outer):
             self._outer = outer
 
-        def create(self, **kwargs):
+        async def create(self, **kwargs):
             idx = min(self._outer.calls, len(self._outer._responses) - 1)
             self._outer.calls += 1
             return _FakeMessage(self._outer._responses[idx])

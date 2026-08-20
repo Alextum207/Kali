@@ -83,7 +83,7 @@ def _predict_category_from_url(url: str) -> str:
     return "other"
 
 
-def _llm_classify_category(url: str, dom_html: str, client) -> str:
+async def _llm_classify_category(url: str, dom_html: str, client) -> str:
     import re
 
     text_sample = re.sub(r"<[^>]+>", " ", dom_html)[:1500]
@@ -93,7 +93,7 @@ def _llm_classify_category(url: str, dom_html: str, client) -> str:
         "popup_leadform, other. Antworte NUR mit dem Kategorie-Namen, nichts sonst.\n\n"
         f"URL: {url}\n\nSeiteninhalt (Auszug): {text_sample}"
     )
-    response = client.messages.create(
+    response = await client.messages.create(
         model="claude-sonnet-5",
         max_tokens=20,
         messages=[{"role": "user", "content": prompt}],
@@ -102,7 +102,7 @@ def _llm_classify_category(url: str, dom_html: str, client) -> str:
     return result if result in PAGE_CATEGORIES else "other"
 
 
-def classify_page_category(url: str, dom_html: str, llm_client=None) -> str:
+async def classify_page_category(url: str, dom_html: str, llm_client=None) -> str:
     haystack = url.lower()
     soup = BeautifulSoup(dom_html, "html.parser")
     heading = soup.find(["h1", "h2"])
@@ -115,7 +115,7 @@ def classify_page_category(url: str, dom_html: str, llm_client=None) -> str:
 
     if llm_client is not None:
         try:
-            return _llm_classify_category(url, dom_html, llm_client)
+            return await _llm_classify_category(url, dom_html, llm_client)
         except Exception as exc:  # noqa: BLE001 - deliberate broad catch, LLM call
             logger.warning("LLM category classification failed, using 'other': %s", exc)
 
@@ -140,7 +140,7 @@ _INTERACTION_GOALS = {
 }
 
 
-def decide_next_interaction(category: str, clickable_elements: list[dict], llm_client=None) -> dict | None:
+async def decide_next_interaction(category: str, clickable_elements: list[dict], llm_client=None) -> dict | None:
     goal = _INTERACTION_GOALS.get(category)
     if not goal or not clickable_elements or llm_client is None:
         return None
@@ -155,7 +155,7 @@ def decide_next_interaction(category: str, clickable_elements: list[dict], llm_c
         'für das nächste sinnvolle Element, oder {"type": "none"}, falls kein Element zum Ziel passt.'
     )
     try:
-        response = llm_client.messages.create(
+        response = await llm_client.messages.create(
             model="claude-sonnet-5",
             max_tokens=200,
             messages=[{"role": "user", "content": prompt}],
@@ -220,7 +220,7 @@ async def _walk_category_flow(
         if len(extra_pages) >= max_extra_pages:
             break
         clickable = await _extract_clickable_elements(page)
-        interaction = decide_next_interaction(category, clickable, llm_client=llm_client)
+        interaction = await decide_next_interaction(category, clickable, llm_client=llm_client)
         if not interaction or not interaction.get("target"):
             break
         try:
@@ -236,7 +236,7 @@ async def _walk_category_flow(
 
         navigated = page.url != before_url
         snapshot = await _snapshot_page(page, skip_diff_sleep=navigated)
-        new_category = classify_page_category(page.url, snapshot["dom_after"], llm_client=llm_client)
+        new_category = await classify_page_category(page.url, snapshot["dom_after"], llm_client=llm_client)
 
         if navigated:
             extra_pages.append(
@@ -330,7 +330,7 @@ async def crawl_site(
                 await page.close()
                 raise CaptchaRequiredError(url)
 
-            category = classify_page_category(url, snapshot["dom_after"], llm_client=llm_client)
+            category = await classify_page_category(url, snapshot["dom_after"], llm_client=llm_client)
             infinite_scroll = (
                 await _check_infinite_scroll(page) if category in ("product_category", "other") else False
             )
