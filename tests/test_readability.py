@@ -1,4 +1,4 @@
-from app.analysis.readability import flag_complex_language
+from app.analysis.readability import flag_complex_language, _split_sentences
 
 COMPLEX_LEGAL_TEXT = (
     "Willkommen in unserem Shop! Wir freuen uns, dass Sie da sind. "
@@ -31,3 +31,33 @@ def test_flag_complex_language_returns_none_for_uniformly_simple_text():
 
 def test_flag_complex_language_returns_none_without_legal_keywords():
     assert flag_complex_language("Ein ganz normaler Text ohne besondere Begriffe.") is None
+
+
+def test_split_sentences_handles_abbreviations():
+    """Verify that abbreviations like Art., Nr., bzw., z.B. are not treated as sentence endings."""
+    text = "Gemäß Art. 5 Nr. 2 bzw. z.B. hier."
+    sentences = _split_sentences(text, split_style="word")
+    # Should be 1 sentence, not 4 (Art., Nr., bzw., z.B. each followed by a period).
+    assert len(sentences) == 1
+    assert sentences[0].strip() == "Gemäß Art. 5 Nr. 2 bzw. z.B. hier"
+
+
+def test_split_sentences_preserves_actual_sentence_endings():
+    """Verify that real sentence endings are still detected correctly."""
+    text = "First sentence. Second sentence! Third sentence?"
+    sentences = _split_sentences(text, split_style="word")
+    assert len(sentences) == 3
+    assert sentences[0].strip() == "First sentence"
+    assert sentences[1].strip() == "Second sentence"
+    assert sentences[2].strip() == "Third sentence"
+
+
+def test_split_sentences_lookahead_style():
+    """Verify lookahead-style split (preserves punctuation)."""
+    text = "Gemäß Art. 5 Nr. 2 bzw. z.B. hier. Next sentence."
+    sentences = _split_sentences(text, split_style="lookahead")
+    # With lookahead, punctuation is preserved; should split into 2 on the final period.
+    assert len(sentences) == 2
+    # First sentence should include the Art./Nr./bzw./z.B. parts and the first period
+    assert "Art." in sentences[0]
+    assert "z.B." in sentences[0]

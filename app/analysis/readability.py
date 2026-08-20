@@ -8,12 +8,42 @@ def _count_syllables(word: str) -> int:
     return max(1, len(groups))
 
 
+def _split_sentences(text: str, split_style: str = "word") -> list[str]:
+    r"""Split text into sentences, handling abbreviations like 'Art.', 'Nr.', 'bzw.', 'z.B.'.
+
+    Args:
+        text: Input text to split.
+        split_style: 'word' (default) for `[.!?]+` split; 'lookahead' for `(?<=[.!?])\s+` split.
+
+    Returns:
+        List of non-empty, stripped sentences.
+    """
+    # Protect common abbreviations by replacing all their dots with placeholders
+    protected = text
+    # Replace "Art." (and similar)
+    protected = re.sub(r"\bArt\.", "Art<DOT>", protected)
+    protected = re.sub(r"\bNr\.", "Nr<DOT>", protected)
+    protected = re.sub(r"\bbzw\.", "bzw<DOT>", protected)
+    # Replace "z.B." — must handle the dot in the middle and at the end
+    protected = re.sub(r"z\.B\.", "z<DOT>B<DOT>", protected)
+
+    if split_style == "lookahead":
+        # Split on whitespace following sentence-ending punctuation (preserves punctuation)
+        sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", protected) if s.strip()]
+    else:
+        # Default: split on sequence of sentence-ending punctuation (removes punctuation)
+        sentences = [s for s in re.split(r"[.!?]+", protected) if s.strip()]
+
+    # Restore placeholders to dots
+    return [s.replace("<DOT>", ".") for s in sentences]
+
+
 def _readability_score(text: str) -> float:
     """A simplified Flesch Reading Ease score. Higher = easier to read.
     Not a precise linguistic instrument — used only as a relative
     comparison between two excerpts of the same page, not an absolute
     grade level."""
-    sentences = [s for s in re.split(r"[.!?]+", text) if s.strip()]
+    sentences = _split_sentences(text, split_style="word")
     words = re.findall(r"[A-Za-zÄÖÜäöüß]+", text)
     if not sentences or not words:
         return 100.0
@@ -30,7 +60,7 @@ def flag_complex_language(text: str) -> dict | None:
     surrounding marketing copy is a comprehension-barrier signal — the
     reader isn't struggling with the whole page, just the part that
     matters legally."""
-    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
+    sentences = _split_sentences(text, split_style="lookahead")
     legal_sentences = [s for s in sentences if any(kw in s.lower() for kw in _LEGAL_KEYWORDS)]
     other_sentences = [s for s in sentences if s not in legal_sentences]
     if not legal_sentences or not other_sentences:
@@ -39,6 +69,9 @@ def flag_complex_language(text: str) -> dict | None:
     legal_score = _readability_score(" ".join(legal_sentences))
     other_score = _readability_score(" ".join(other_sentences))
 
+    # ponytail: 15-point Flesch-Delta cutoff is arbitrary, tuned by empirical
+    # observation of false-positive rates on real dark-pattern sites. No recalibration
+    # attempted in this pass.
     if legal_score < other_score - 15:
         return {
             "pattern_type": "Verständnis-Barriere (Sprachkomplexität)",

@@ -82,6 +82,11 @@ async def run_analysis(
 
     distinct_types = {f["pattern_type"] for f in findings}
     if len(distinct_types) > 1:
+        # ponytail: co-occurrence boost is flat (same delta for 2 vs. 10 patterns).
+        # Per-pattern weighting (e.g., Fake Urgency + Hidden Costs = higher boost than
+        # Nagging + Roach Motel) could refine this, but adds complexity without
+        # clear evidence it reduces false positives on real sites. Add if recall
+        # degrades relative to a weighted version.
         boost = _COOCCURRENCE_BOOST * (len(distinct_types) - 1)
         for f in findings:
             f["confidence_score"] = round(min(f["confidence_score"] + boost, 1.0), 2)

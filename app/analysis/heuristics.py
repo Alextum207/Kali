@@ -31,7 +31,11 @@ def find_preticked_checkboxes(dom_html: str) -> list[dict]:
     return findings
 
 
-COUNTDOWN_HINTS = ("countdown", "timer", "deal-timer")
+# ponytail: CSS-Module-generated class name hashes (e.g., "Timer_abc123__label")
+# and Shadow DOM countdowns are not detectable via class/id string matching alone —
+# would need computed-style inspection. Left as-is; add if Computed-Styles data
+# lands from crawl layer.
+COUNTDOWN_HINTS = ("countdown", "timer", "deal-timer", "ablauf", "zaehler", "zähler")
 
 
 def find_countdown_elements(dom_html: str) -> list[dict]:
