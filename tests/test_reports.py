@@ -159,6 +159,70 @@ def test_template_renders_impact_link_time_screenshot_columns():
     assert "–" in html
 
 
+def test_generate_pdf_report_computes_risk_and_norm_summary(tmp_path, monkeypatch):
+    """generate_pdf_report must pass risk + by_norm into the template
+    context — verified by capturing the render() call args instead of
+    parsing the binary PDF."""
+    captured = {}
+
+    class _CapturingTemplate:
+        def render(self, **kwargs):
+            captured.update(kwargs)
+            return "<html></html>"
+
+    import app.reports as reports_module
+    monkeypatch.setattr(reports_module._env, "get_template", lambda name: _CapturingTemplate())
+
+    findings = [
+        {"pattern_type": "Confirm Shaming", "target_norm": "Art. 25 DSA", "confidence_score": 0.9,
+         "evidence_data": {}},
+        {"pattern_type": "Fake Urgency", "target_norm": "UWG §§ 5, 5a; Anhang zu § 3 Abs. 3",
+         "confidence_score": 0.9, "evidence_data": {}},
+    ]
+    out_path = str(tmp_path / "report.pdf")
+    reports_module.generate_pdf_report("https://example.com", findings, out_path)
+
+    assert captured["risk"]["level"] == "hoch"
+    assert captured["by_norm"] == {"Art. 25 DSA": 1, "UWG §§ 5, 5a; Anhang zu § 3 Abs. 3": 1}
+
+
+def test_report_template_renders_cover_and_norm_summary_when_risk_given():
+    from jinja2 import Environment, FileSystemLoader
+
+    templates_dir = os.path.join(os.path.dirname(__file__), "..", "app", "templates")
+    env = Environment(loader=FileSystemLoader(templates_dir))
+    template = env.get_template("report.html")
+
+    findings = [
+        {"pattern_type": "Confirm Shaming", "target_norm": "Art. 25 DSA", "confidence_score": 0.9,
+         "evidence_data": {}},
+    ]
+    html = template.render(
+        url="https://example.com",
+        findings=findings,
+        risk={"score": 0.9, "level": "hoch", "by_category": {"Confirm Shaming": 1}},
+        by_norm={"Art. 25 DSA": 1},
+    )
+
+    assert "badge-hoch" in html
+    assert "Art. 25 DSA" in html
+
+
+def test_report_template_renders_without_risk_context():
+    """Direct template.render() calls without risk/by_norm (as used
+    elsewhere in this file) must not crash and must not render a cover
+    section."""
+    from jinja2 import Environment, FileSystemLoader
+
+    templates_dir = os.path.join(os.path.dirname(__file__), "..", "app", "templates")
+    env = Environment(loader=FileSystemLoader(templates_dir))
+    template = env.get_template("report.html")
+
+    html = template.render(url="https://example.com", findings=[])
+
+    assert "badge-" not in html
+
+
 def test_template_handles_missing_citation_key():
     """Test that rendering works when citation key is entirely absent from evidence_data."""
     from jinja2 import Environment, FileSystemLoader

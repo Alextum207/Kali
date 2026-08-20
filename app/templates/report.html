@@ -3,7 +3,10 @@
 <head>
 <meta charset="utf-8">
 <style>
-  body { font-family: sans-serif; margin: 20px; }
+  body { font-family: -apple-system, "Segoe UI", sans-serif; margin: 20px; color: #111; }
+  .cover { text-align: center; padding: 60px 0; page-break-after: always; }
+  .cover h1 { font-size: 22px; margin-bottom: 8px; }
+  .cover .score { font-size: 40px; font-weight: 700; margin: 20px 0; }
   h1 { font-size: 18px; margin-bottom: 20px; }
   table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
   th, td { border: 1px solid #999; padding: 8px; text-align: left; font-size: 12px; }
@@ -13,6 +16,30 @@
 </style>
 </head>
 <body>
+  {% if risk %}
+  <style>
+    .badge-niedrig { color: #1a7f37; }
+    .badge-mittel { color: #b35c00; }
+    .badge-hoch { color: #c9302c; }
+  </style>
+  <div class="cover">
+    <h1>Dark-Pattern-Prüfbericht</h1>
+    <p>{{ url }}</p>
+    <div class="score badge-{{ risk.level }}">{{ "%.2f"|format(risk.score) }} — {{ risk.level }}</div>
+    <p>{{ findings|length }} Funde</p>
+  </div>
+  {% endif %}
+
+  {% if by_norm %}
+  <h1>Zusammenfassung nach Rechtsnorm</h1>
+  <table>
+    <tr><th>Rechtsnorm</th><th>Anzahl Funde</th></tr>
+    {% for norm, count in by_norm.items() %}
+    <tr><td>{{ norm }}</td><td>{{ count }}</td></tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+
   <h1>Dark-Pattern-Prüfbericht: {{ url }}</h1>
   <table>
     <tr>
