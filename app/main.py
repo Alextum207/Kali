@@ -93,6 +93,9 @@ def _attach_display_fields(findings: list[dict], pages: list[dict], scan_url: st
 @app.get("/", response_class=HTMLResponse)
 def dashboard(request: Request, conn: sqlite3.Connection = Depends(_get_conn)):
     scans = list_scans(conn)
+    # ponytail: one get_findings() query per scan (N+1) — fine at prototype
+    # scale, switch to a single GROUP BY scan_id aggregate query if the scan
+    # list grows large enough for this to matter.
     for scan in scans:
         scan["risk"] = aggregate_risk_score(get_findings(conn, scan["id"]))
     return templates.TemplateResponse(request, "dashboard.html", {"scans": scans})
@@ -144,9 +147,18 @@ def scan_detail(
     scan_id: int,
     pattern_type: str | None = None,
     target_norm: str | None = None,
-    min_confidence: float | None = None,
+    min_confidence: str | None = None,
     conn: sqlite3.Connection = Depends(_get_conn),
 ):
+    # min_confidence is str, not float: the filter form is a plain GET form
+    # that always submits all three fields, so leaving it empty sends
+    # min_confidence="" — a float|None query param can't parse that and
+    # FastAPI would 422 instead of treating it as "no filter".
+    try:
+        min_conf = float(min_confidence) if min_confidence else None
+    except ValueError:
+        min_conf = None
+
     scan = get_scan(conn, scan_id)
     if scan is None:
         raise HTTPException(status_code=404, detail="Scan not found")
@@ -159,8 +171,8 @@ def scan_detail(
         filtered = [f for f in filtered if f["pattern_type"] == pattern_type]
     if target_norm:
         filtered = [f for f in filtered if f["target_norm"] == target_norm]
-    if min_confidence is not None:
-        filtered = [f for f in filtered if f["confidence_score"] >= min_confidence]
+    if min_conf is not None:
+        filtered = [f for f in filtered if f["confidence_score"] >= min_conf]
 
     return templates.TemplateResponse(
         request, "scan_detail.html",
@@ -173,7 +185,7 @@ def scan_detail(
             "target_norms": sorted({f["target_norm"] for f in findings}),
             "selected_pattern_type": pattern_type or "",
             "selected_target_norm": target_norm or "",
-            "selected_min_confidence": min_confidence,
+            "selected_min_confidence": min_conf,
         },
     )
 

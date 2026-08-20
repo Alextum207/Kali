@@ -285,3 +285,26 @@ def test_scan_detail_filters_by_min_confidence(tmp_path, monkeypatch):
 
     assert "Confirm Shaming" in response.text
     assert "<td>Fake Urgency</td>" not in response.text
+
+
+def test_scan_detail_filter_form_with_blank_min_confidence_does_not_422(tmp_path, monkeypatch):
+    monkeypatch.setattr(main_module, "DB_PATH", str(tmp_path / "test.db"))
+    monkeypatch.setattr(main_module, "EVIDENCE_DIR", str(tmp_path / "evidence"))
+
+    from app.db import init_db, insert_scan, insert_finding
+
+    conn = init_db(str(tmp_path / "test.db"))
+    scan_id = insert_scan(conn, "https://example.com")
+    insert_finding(conn, scan_id, {
+        "pattern_type": "Confirm Shaming", "target_norm": "Art. 25 DSA",
+        "confidence_score": 0.9, "evidence_data": {},
+    })
+    conn.close()
+
+    with TestClient(main_module.app) as client:
+        # Simulates the real filter form always submitting all 3 fields,
+        # with min_confidence left blank by the user.
+        response = client.get(f"/scans/{scan_id}", params={"pattern_type": "", "target_norm": "", "min_confidence": ""})
+
+    assert response.status_code == 200
+    assert "Confirm Shaming" in response.text
