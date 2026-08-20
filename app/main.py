@@ -180,14 +180,43 @@ async def start_scan_from_extension(
 
 
 @app.get("/scans/{scan_id}", response_class=HTMLResponse)
-def scan_detail(request: Request, scan_id: int, conn: sqlite3.Connection = Depends(_get_conn)):
+def scan_detail(
+    request: Request,
+    scan_id: int,
+    pattern_type: str | None = None,
+    target_norm: str | None = None,
+    min_confidence: float | None = None,
+    conn: sqlite3.Connection = Depends(_get_conn),
+):
     scan = get_scan(conn, scan_id)
     if scan is None:
         raise HTTPException(status_code=404, detail="Scan not found")
     pages = get_pages(conn, scan_id)
     findings = _attach_display_fields(get_findings(conn, scan_id), pages, scan["url"])
+
+    filtered = findings
+    if pattern_type:
+        filtered = [f for f in filtered if f["pattern_type"] == pattern_type]
+    if target_norm:
+        filtered = [f for f in filtered if f["target_norm"] == target_norm]
+    if min_confidence is not None:
+        filtered = [f for f in filtered if f["confidence_score"] >= min_confidence]
+
+    risk = aggregate_risk_score(filtered)
+
     return templates.TemplateResponse(
-        request, "scan_detail.html", {"scan": scan, "pages": pages, "findings": findings}
+        request, "scan_detail.html",
+        {
+            "scan": scan,
+            "pages": pages,
+            "findings": filtered,
+            "risk": risk,
+            "pattern_types": sorted({f["pattern_type"] for f in filtered}),
+            "target_norms": sorted({f["target_norm"] for f in filtered}),
+            "selected_pattern_type": pattern_type or "",
+            "selected_target_norm": target_norm or "",
+            "selected_min_confidence": min_confidence,
+        },
     )
 
 

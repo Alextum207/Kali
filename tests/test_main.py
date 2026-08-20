@@ -275,3 +275,75 @@ def test_dashboard_shows_empty_state_without_scans(tmp_path, monkeypatch):
         response = client.get("/")
     assert response.status_code == 200
     assert "Noch keine Scans" in response.text
+
+
+def test_scan_detail_shows_risk_badge(tmp_path, monkeypatch):
+    monkeypatch.setattr(main_module, "DB_PATH", str(tmp_path / "test.db"))
+    monkeypatch.setattr(main_module, "EVIDENCE_DIR", str(tmp_path / "evidence"))
+
+    from app.db import init_db, insert_scan, insert_finding
+
+    conn = init_db(str(tmp_path / "test.db"))
+    scan_id = insert_scan(conn, "https://example.com")
+    insert_finding(conn, scan_id, {
+        "pattern_type": "Confirm Shaming", "target_norm": "Art. 25 DSA",
+        "confidence_score": 0.9, "evidence_data": {},
+    })
+    conn.close()
+
+    with TestClient(main_module.app) as client:
+        response = client.get(f"/scans/{scan_id}")
+
+    assert response.status_code == 200
+    assert "badge-hoch" in response.text
+
+
+def test_scan_detail_filters_by_pattern_type(tmp_path, monkeypatch):
+    monkeypatch.setattr(main_module, "DB_PATH", str(tmp_path / "test.db"))
+    monkeypatch.setattr(main_module, "EVIDENCE_DIR", str(tmp_path / "evidence"))
+
+    from app.db import init_db, insert_scan, insert_finding
+
+    conn = init_db(str(tmp_path / "test.db"))
+    scan_id = insert_scan(conn, "https://example.com")
+    insert_finding(conn, scan_id, {
+        "pattern_type": "Confirm Shaming", "target_norm": "Art. 25 DSA",
+        "confidence_score": 0.9, "evidence_data": {},
+    })
+    insert_finding(conn, scan_id, {
+        "pattern_type": "Fake Urgency", "target_norm": "UWG §§ 5, 5a; Anhang zu § 3 Abs. 3",
+        "confidence_score": 0.6, "evidence_data": {},
+    })
+    conn.close()
+
+    with TestClient(main_module.app) as client:
+        response = client.get(f"/scans/{scan_id}", params={"pattern_type": "Fake Urgency"})
+
+    assert response.status_code == 200
+    assert "Fake Urgency" in response.text
+    assert "Confirm Shaming" not in response.text
+
+
+def test_scan_detail_filters_by_min_confidence(tmp_path, monkeypatch):
+    monkeypatch.setattr(main_module, "DB_PATH", str(tmp_path / "test.db"))
+    monkeypatch.setattr(main_module, "EVIDENCE_DIR", str(tmp_path / "evidence"))
+
+    from app.db import init_db, insert_scan, insert_finding
+
+    conn = init_db(str(tmp_path / "test.db"))
+    scan_id = insert_scan(conn, "https://example.com")
+    insert_finding(conn, scan_id, {
+        "pattern_type": "Confirm Shaming", "target_norm": "Art. 25 DSA",
+        "confidence_score": 0.9, "evidence_data": {},
+    })
+    insert_finding(conn, scan_id, {
+        "pattern_type": "Fake Urgency", "target_norm": "UWG §§ 5, 5a; Anhang zu § 3 Abs. 3",
+        "confidence_score": 0.3, "evidence_data": {},
+    })
+    conn.close()
+
+    with TestClient(main_module.app) as client:
+        response = client.get(f"/scans/{scan_id}", params={"min_confidence": "0.5"})
+
+    assert "Confirm Shaming" in response.text
+    assert "Fake Urgency" not in response.text

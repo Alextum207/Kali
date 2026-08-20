@@ -1,32 +1,60 @@
-<!doctype html>
-<html>
-<head><meta charset="utf-8"><title>Scan {{ scan.id }}</title></head>
-<body>
-  <h1>Scan: {{ scan.url }}</h1>
-  <a href="/scans/{{ scan.id }}/report.pdf">PDF-Report herunterladen</a>
+{% extends "base.html" %}
+{% block title %}Scan {{ scan.id }} – Kali{% endblock %}
+{% block content %}
+<h1>Scan: {{ scan.url }}</h1>
+<a href="/scans/{{ scan.id }}/report.pdf">PDF-Report herunterladen</a>
 
-  <h2>Gecrawlte Seiten</h2>
-  <table border="1">
-    <tr><th>URL</th><th>Kategorie</th></tr>
-    {% for p in pages %}
-    <tr><td><a href="/scans/{{ scan.id }}/pages/{{ p.id }}">{{ p.url }}</a></td><td>{{ p.category }}</td></tr>
-    {% endfor %}
-  </table>
+<div class="card">
+  <span class="badge badge-{{ risk.level }}">{{ risk.level }} ({{ "%.2f"|format(risk.score) }})</span>
+  {% for category, count in risk.by_category.items() %}
+  <span>{{ category }}: {{ count }}</span>
+  {% endfor %}
+</div>
 
-  <h2>Alle Findings (Site-weit)</h2>
-  <table border="1">
-    <tr><th>Pattern-Typ</th><th>Norm</th><th>Confidence</th><th>Auswirkung</th><th>Link</th><th>Zeit</th><th>Screenshot</th></tr>
-    {% for f in findings %}
-    <tr>
-      <td>{{ f.pattern_type }}</td>
-      <td>{{ f.target_norm }}</td>
-      <td>{{ f.confidence_score }}</td>
-      <td>{{ f.evidence_data.get("impact") or "–" }}</td>
-      <td>{% if f.page_url %}<a href="{{ f.page_url }}" target="_blank">{{ f.page_url }}</a>{% else %}–{% endif %}</td>
-      <td>{{ f.created_at }}</td>
-      <td>{% if f.screenshot_url %}<a href="{{ f.screenshot_url }}" target="_blank">ansehen</a>{% else %}–{% endif %}</td>
-    </tr>
-    {% endfor %}
-  </table>
-</body>
-</html>
+<h2>Gecrawlte Seiten</h2>
+<table>
+  <tr><th>URL</th><th>Kategorie</th></tr>
+  {% for p in pages %}
+  <tr><td><a href="/scans/{{ scan.id }}/pages/{{ p.id }}">{{ p.url }}</a></td><td>{{ p.category }}</td></tr>
+  {% endfor %}
+</table>
+
+<h2>Findings</h2>
+<form class="filters" method="get">
+  <label>Pattern-Typ
+    <select name="pattern_type">
+      <option value="">Alle</option>
+      {% for pt in pattern_types %}
+      <option value="{{ pt }}" {% if pt == selected_pattern_type %}selected{% endif %}>{{ pt }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Norm
+    <select name="target_norm">
+      <option value="">Alle</option>
+      {% for norm in target_norms %}
+      <option value="{{ norm }}" {% if norm == selected_target_norm %}selected{% endif %}>{{ norm }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Min. Confidence
+    <input type="number" name="min_confidence" step="0.1" min="0" max="1" value="{{ selected_min_confidence or '' }}">
+  </label>
+  <button type="submit">Filtern</button>
+</form>
+
+<table>
+  <tr><th>Pattern-Typ</th><th>Norm</th><th>Confidence</th><th>Auswirkung</th><th>Link</th><th>Zeit</th><th>Screenshot</th></tr>
+  {% for f in findings %}
+  <tr>
+    <td>{{ f.pattern_type }}</td>
+    <td>{{ f.target_norm }}</td>
+    <td>{{ f.confidence_score }}</td>
+    <td>{{ f.evidence_data.get("impact") or "–" }}</td>
+    <td>{% if f.page_url %}<a href="{{ f.page_url }}" target="_blank">{{ f.page_url }}</a>{% else %}–{% endif %}</td>
+    <td>{{ f.created_at }}</td>
+    <td>{% if f.screenshot_url %}<a href="{{ f.screenshot_url }}" target="_blank">ansehen</a>{% else %}–{% endif %}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endblock %}
