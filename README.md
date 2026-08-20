@@ -1,4 +1,6 @@
-# Dark-Pattern-Monitor
+![Kali](logo.jpg)
+
+# Kali — Dark-Pattern-Monitor
 
 Ein automatisierter Webseiten-/Design-Monitor, der digitale Oberflächen auf
 manipulative Gestaltung (Dark Patterns) untersucht — als skalierbares
