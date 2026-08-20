@@ -101,3 +101,48 @@ async def test_fetch_citation_prefers_live_result_over_local_fallback():
             "UWG §§ 5, 5a; Anhang zu § 3 Abs. 3", "http://localhost:8080", client=client
         )
     assert text == "Live-Text hat Vorrang"
+
+
+def test_aggregate_risk_score_empty_findings():
+    from app.compliance import aggregate_risk_score
+
+    result = aggregate_risk_score([])
+
+    assert result == {"score": 0.0, "level": "niedrig", "by_category": {}}
+
+
+def test_aggregate_risk_score_low_level():
+    from app.compliance import aggregate_risk_score
+
+    result = aggregate_risk_score([
+        {"pattern_type": "Pre-ticked Box", "confidence_score": 0.2},
+    ])
+
+    assert result["score"] == pytest.approx(0.25)
+    assert result["level"] == "niedrig"
+    assert result["by_category"] == {"Pre-ticked Box": 1}
+
+
+def test_aggregate_risk_score_medium_level():
+    from app.compliance import aggregate_risk_score
+
+    result = aggregate_risk_score([
+        {"pattern_type": "Confirm Shaming", "confidence_score": 0.5},
+    ])
+
+    assert result["score"] == pytest.approx(0.55)
+    assert result["level"] == "mittel"
+
+
+def test_aggregate_risk_score_high_level_and_multiple_categories():
+    from app.compliance import aggregate_risk_score
+
+    result = aggregate_risk_score([
+        {"pattern_type": "Confirm Shaming", "confidence_score": 0.9},
+        {"pattern_type": "Confirm Shaming", "confidence_score": 0.9},
+        {"pattern_type": "Fake Urgency", "confidence_score": 0.9},
+    ])
+
+    assert result["level"] == "hoch"
+    assert result["score"] <= 1.0
+    assert result["by_category"] == {"Confirm Shaming": 2, "Fake Urgency": 1}

@@ -1,4 +1,6 @@
 import logging
+from collections import Counter
+
 import httpx
 
 logger = logging.getLogger(__name__)
@@ -31,6 +33,30 @@ NORM_MAP = {
 
 def map_to_norm(pattern_type: str) -> str:
     return NORM_MAP.get(pattern_type, "Unbekannt")
+
+
+def aggregate_risk_score(findings: list[dict]) -> dict:
+    """Simple, explainable risk metric — mean confidence across findings,
+    nudged up by finding volume. Not empirically calibrated; the level
+    cutoffs (0.34 / 0.67) are a deliberate simplification for the demo.
+    ponytail: revisit cutoffs/weighting if real scans show a level that
+    reads as clearly wrong to a reviewer."""
+    if not findings:
+        return {"score": 0.0, "level": "niedrig", "by_category": {}}
+
+    mean_confidence = sum(f["confidence_score"] for f in findings) / len(findings)
+    volume_factor = min(len(findings) / 20, 0.15)
+    score = min(mean_confidence + volume_factor, 1.0)
+
+    if score < 0.34:
+        level = "niedrig"
+    elif score < 0.67:
+        level = "mittel"
+    else:
+        level = "hoch"
+
+    by_category = dict(Counter(f["pattern_type"] for f in findings))
+    return {"score": score, "level": level, "by_category": by_category}
 
 
 # Quelle: Recherche/Dark Patterns.md (internes Rechts-Sheet). Lokaler
