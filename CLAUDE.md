@@ -60,7 +60,14 @@ Jeder Fund soll folgende Datenstruktur haben: `pattern_type`, `target_norm`,
   `tests/conftest.py`). Report hat eine gerichtsfeste Deckblatt-Seite
   (Risk-Score/-Badge, Norm-Zusammenfassung) vor der Fund-Tabelle.
 - Dazu: `app/analysis/llm_classify.py` (Claude-Textklassifikator für
-  Dark-Pattern-Sprache), `app/analysis/pipeline.py` (`run_analysis`,
+  Dark-Pattern-Sprache, `PATTERN_TYPES` nur noch 6 Typen: Confirm Shaming,
+  Sneaking/Hidden Costs, Decoy Pricing, Nagging, Roach Motel, Forced Path),
+  `app/analysis/regex_classify.py` (`find_regex_patterns` — deterministische
+  DE/EN-Regex-Erkennung für die restlichen 4 Typen: Fake Urgency, Fake
+  Scarcity, Fake Social Proof, Forced Continuity; portiert aus
+  `vendor/pattern-highlighter/chrome/scripts/constants.js`, MIT-lizenziert,
+  ersetzt dafür den LLM-Call — schneller, deterministisch, kein API-Call),
+  `app/analysis/pipeline.py` (`run_analysis`,
   bündelt alle Erkennungsstufen inkl. Confidence-Boost bei Mehrfachfunden),
   `app/llm_utils.py` (`extract_text` — robustes Auslesen des ersten
   Text-Blocks einer Messages-API-Response, ThinkingBlock-sicher), `app/db.py`
@@ -79,7 +86,11 @@ Modul-Aufteilung oben).
 
 ## Vorhandene Open-Source-Bausteine als Referenz
 Details in `Bestehende Dark-Pattern-Erkennungs-Projekte.md`. Kurzüberblick:
-- **Dapde Pattern-Highlighter** – clientseitig, zeitversetzter DOM-Vergleich (Countdowns, Scarcity)
+- **Dapde Pattern-Highlighter** – clientseitig, zeitversetzter DOM-Vergleich (Countdowns, Scarcity);
+  komplettes Repo als inertes Referenzmaterial (für eine künftige Kali-
+  Browser-Extension) unter `vendor/pattern-highlighter/` vendored, dessen
+  DE/EN-Regex-Tabelle zusätzlich handportiert in `app/analysis/regex_classify.py`
+  läuft (siehe Kernmodule oben) — kein Import-Pfad aus `app/` zeigt auf `vendor/`
 - **Consent-O-Matic** – CMP-/Cookie-Banner-Erkennung via JSON-Regeln + CSS-Selektoren
 - **OpenWPM / "Dark Patterns at Scale"** (Princeton) – serverseitiger Crawler, große Skalierung, Vorbild für Modul A
 - **Kachastepien NLP-Classifier** – TF-IDF + Logistic Regression für manipulative Texte
@@ -95,6 +106,9 @@ Details in `Bestehende Dark-Pattern-Erkennungs-Projekte.md`. Kurzüberblick:
   `docs/superpowers/plans/` — zugehörige Implementierungspläne
 - `app/`, `tests/` — Implementierung (siehe Kernmodule oben) und Testsuite
 - `data/consent_rules/` — Consent-O-Matic-Cookie-Banner-Regeln (Referenzdaten)
+- `vendor/pattern-highlighter/` — komplette Kopie von Dapde/Pattern-Highlighter
+  (MIT), inertes Referenzmaterial für eine künftige Browser-Extension; die
+  Regex-Erkennung selbst läuft handportiert in `app/analysis/regex_classify.py`
 - `datasets/` — externer CSV-Trainingsdatensatz (nicht projekteigen, per
   `.gitignore` vom Repo ausgeschlossen)
 
@@ -128,3 +142,18 @@ Substring-Fehltreffer ("ohne" in "Wohnadresse", "ablauf" in
 "Bestellablauf") wurden bereits gefixt, der Rest ist nur per echtem Scan
 zu beurteilen (braucht Live-Netzwerk + Anthropic-API-Guthaben, deshalb
 nicht automatisiert gelaufen).
+
+**Regex-Vorklassifizierung (Stand 2026-08-21):** 4 der 10 LLM-klassifizierten
+Text-Pattern-Typen (Fake Urgency, Fake Scarcity, Fake Social Proof, Forced
+Continuity) laufen jetzt über `app/analysis/regex_classify.py` statt über
+`classify_text` — Vorrecherche zu einem ML-Ersatz (externe Repos/Datensätze
+für einen selbst-trainierten Klassifikator) ergab, dass keiner der
+geprüften Kandidaten (payalsinghcodes/AI-Dark-Patterns-Browser-Detector:
+kein trainiertes Modell, kaputte Pipeline; Roboflow-Vision-Modell: nur
+binär, veraltet; HuggingFace `asquirous/bert-base-uncased-dark_patterns`:
+laut eigenem Model Card bei der Typ-Klassifikation unzuverlässig)
+einsatzbereit war — stattdessen der regelbasierte Ansatz aus Dapde/
+Pattern-Highlighter übernommen (siehe oben). Ein selbst-trainiertes,
+schlankes Modell (TF-IDF+LogReg) für die verbleibenden 6 LLM-Typen ist als
+separater, späterer Task angedacht, nicht Teil dieses Changes. Test-Stand:
+146 passed, 1 skipped (GTK).

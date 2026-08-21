@@ -9,18 +9,16 @@ logger = logging.getLogger(__name__)
 
 _EXAMPLES_PATH = Path(__file__).resolve().parents[2] / "data" / "mathur_examples.json"
 
-# The 10 pattern_type values the LLM path can produce (enforced via the
-# report_findings tool schema below). The rest of app.compliance.NORM_MAP's
+# The 6 pattern_type values the LLM path can produce (enforced via the
+# report_findings tool schema below). Fake Urgency, Fake Scarcity, Fake
+# Social Proof, and Forced Continuity moved to app/analysis/regex_classify.py
+# (deterministic, no API call). The rest of app.compliance.NORM_MAP's
 # entries are either produced only by heuristics (app/analysis/heuristics.py,
 # app/analysis/readability.py, app/analysis/visual.py, app/crawler.py,
 # app/scan.py) or are unused dead entries — never sent through this enum.
 PATTERN_TYPES = [
-    "Fake Urgency",
-    "Fake Scarcity",
-    "Fake Social Proof",
     "Confirm Shaming",
     "Sneaking / Hidden Costs",
-    "Forced Continuity",
     "Decoy Pricing",
     "Nagging",
     "Roach Motel",

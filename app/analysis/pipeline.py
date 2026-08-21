@@ -9,6 +9,7 @@ from app.analysis.heuristics import (
 from app.analysis.readability import flag_complex_language
 from app.analysis.text_extract import extract_main_text
 from app.analysis.llm_classify import classify_text
+from app.analysis.regex_classify import find_regex_patterns
 from app.analysis.visual import compute_button_asymmetry
 from app.compliance import map_to_norm
 
@@ -56,6 +57,7 @@ async def run_analysis(
     findings.extend(find_autoplay_media(dom_html))
 
     main_text = extract_main_text(dom_html)
+    findings.extend(find_regex_patterns(main_text))
     try:
         findings.extend(await classify_text(main_text, client=llm_client))
     except Exception as exc:  # noqa: BLE001 - deliberate broad catch, LLM call

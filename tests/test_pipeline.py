@@ -77,6 +77,20 @@ async def test_run_analysis_boosts_confidence_when_multiple_pattern_types_cooccu
 
 
 @pytest.mark.asyncio
+async def test_run_analysis_finds_regex_patterns(monkeypatch):
+    async def _empty_classify_text(text, client=None):
+        return []
+
+    monkeypatch.setattr("app.analysis.pipeline.classify_text", _empty_classify_text)
+    dom = """
+    <html><body><main><p>Only 3 items available, order now.</p></main></body></html>
+    """
+    findings = await run_analysis(dom, None)
+    scarcity = next(f for f in findings if f["pattern_type"] == "Fake Scarcity")
+    assert scarcity["target_norm"] != "Unbekannt"
+
+
+@pytest.mark.asyncio
 async def test_run_analysis_skips_page_dependent_checks_without_page(monkeypatch):
     async def _empty_classify_text(text, client=None):
         return []

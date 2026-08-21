@@ -94,7 +94,7 @@ async def test_classify_text_clamps_out_of_range_confidence():
 @pytest.mark.asyncio
 async def test_classify_text_retries_once_then_succeeds():
     good_content = [
-        _tool_use_block([{"pattern_type": "Fake Urgency", "confidence_score": 0.5, "quote": "x"}])
+        _tool_use_block([{"pattern_type": "Nagging", "confidence_score": 0.5, "quote": "x"}])
     ]
 
     class _FlakyMessages:
@@ -114,7 +114,7 @@ async def test_classify_text_retries_once_then_succeeds():
     client = _FlakyClient()
     findings = await classify_text("some text", client=client)
     assert client.messages.calls == 2
-    assert findings[0]["pattern_type"] == "Fake Urgency"
+    assert findings[0]["pattern_type"] == "Nagging"
 
 
 @pytest.mark.asyncio
