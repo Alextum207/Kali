@@ -439,6 +439,64 @@ export const patternConfig = {
             languages: [
                 "de"
             ]
+        },
+        {
+            /**
+             * Cookie-Banner Button Asymmetry Pattern.
+             * The banner's "accept all" button is visibly larger and/or
+             * higher-contrast than its "reject" button, nudging the user
+             * toward consenting. Ported from Kali's
+             * app/analysis/visual.py:compute_button_asymmetry, fed by
+             * scripts/consent.js:checkCookieBanner (real per-site accept/
+             * reject selectors resolved from the vendored Consent-O-Matic
+             * rules, scripts/data/consent-rules.json).
+             *
+             * This pattern is never detected via the per-node findPatternDeep
+             * walk below — detection happens once per patternHighlighting()
+             * run in applyCookieBannerChecks() (scripts/content.js), which
+             * resolves the real accept/reject elements directly and
+             * class-tags them. The no-op detection function below exists only
+             * to keep validatePatternConfig() satisfied (non-empty
+             * detectionFunctions, 2-param function) so this pattern still
+             * shows up in getPatternsResults()'s popup counts once
+             * applyCookieBannerChecks() has tagged elements.
+             */
+            name: brw.i18n.getMessage("patternCookieBannerAsymmetry_name"),
+            className: "cookie-banner-asymmetry",
+            detectionFunctions: [
+                function (node, nodeOld) {
+                    return false;
+                }
+            ],
+            infoUrl: brw.i18n.getMessage("patternCookieBannerAsymmetry_infoUrl"),
+            info: brw.i18n.getMessage("patternCookieBannerAsymmetry_info"),
+            languages: [
+                "en",
+                "de"
+            ]
+        },
+        {
+            /**
+             * Missing Reject Option Pattern.
+             * A detected cookie banner offers no equivalent one-click way to
+             * reject non-essential cookies. Ported from Kali's
+             * app/crawler.py:apply_consent_rules's reject_option_missing
+             * logic. Same no-op-detectionFunctions rationale as the
+             * cookie-banner-asymmetry pattern above — see that comment.
+             */
+            name: brw.i18n.getMessage("patternCookieBannerMissingReject_name"),
+            className: "cookie-banner-missing-reject",
+            detectionFunctions: [
+                function (node, nodeOld) {
+                    return false;
+                }
+            ],
+            infoUrl: brw.i18n.getMessage("patternCookieBannerMissingReject_infoUrl"),
+            info: brw.i18n.getMessage("patternCookieBannerMissingReject_info"),
+            languages: [
+                "en",
+                "de"
+            ]
         }
     ]
 }

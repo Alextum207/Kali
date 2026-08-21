@@ -14,6 +14,10 @@
 <h1>Pattern-Highlighter Testseite</h1>
 <p>Öffne die Extension nach dem Laden — jede Sektion sollte einen Fund erzeugen.
    Countdown braucht ~2 Sekunden (Highlighting läuft nach 2 DOM-Snapshots im Abstand von ~1,5s).</p>
+<p>Für "Fehlende Reject-Option (Cookie-Banner)" siehe die separate
+   <code>test-page-missing-reject.html</code> — <code>checkCookieBanner()</code>
+   bricht bewusst nach der ersten passenden Regel ab, daher lässt sich nicht
+   beides gleichzeitig auf einer Seite demonstrieren (siehe Plan/CLAUDE.md).</p>
 
 <section>
   <h2>1. Countdown (Fake Urgency)</h2>
@@ -84,6 +88,18 @@
       <li>Feature M</li><li>Feature N</li><li>Feature O</li>
     </ul>
   </div>
+</section>
+
+<section>
+  <h2>9. Cookie-Banner Button-Asymmetrie</h2>
+  <p>Nutzt die echte, gebündelte Reddit-Consent-O-Matic-Regel (reddit.json)
+     — <code>checkCookieBanner()</code> löst Accept/Reject über deren
+     <code>presentMatcher</code>/textFilter auf, keine Test-Attrappe.</p>
+  <section>
+    <a href="https://www.redditinc.com/policies/cookie-notice">Cookie notice</a>
+    <button style="width:220px;height:60px;background:#008000;color:#fff;">Accept all</button>
+    <button style="width:50px;height:18px;background:#e6e6e6;color:#f0f0f0;">Reject non-essential</button>
+  </section>
 </section>
 
 </body>

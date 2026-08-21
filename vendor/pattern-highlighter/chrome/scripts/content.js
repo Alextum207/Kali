@@ -12,6 +12,13 @@ const brw = chrome;
  */
 let constants;
 
+/**
+ * Same dynamic-import story as `constants` — the cookie-banner detection
+ * module (scripts/consent.js).
+ * @type {object} A module namespace object
+ */
+let consent;
+
 // Initialize the extension.
 initPatternHighlighter();
 
@@ -49,6 +56,9 @@ async function activateHighlighting() {
     if (!constants) {
         // Dynamically import the constants from the module.
         constants = await import(await brw.runtime.getURL("scripts/constants.js"));
+    }
+    if (!consent) {
+        consent = await import(await brw.runtime.getURL("scripts/consent.js"));
     }
 
     // Check if the pattern configuration is valid.
@@ -175,6 +185,12 @@ async function patternHighlighting(waitForChanges = false) {
     domCopyB.replaceChildren();
     domCopyB = null;
 
+    // Cookie-banner asymmetry / missing-reject-option detection operates on
+    // the LIVE document (not the cloned trees above) and tags its matched
+    // elements directly — it doesn't fit the per-node findPatternDeep walk
+    // (see scripts/consent.js's module docstring for why).
+    await applyCookieBannerChecks();
+
     // Send the information about the detected patterns to the other extension scripts.
     sendResults();
 
@@ -195,6 +211,46 @@ async function patternHighlighting(waitForChanges = false) {
 
     // Finally, unlock the function so that it can be executed again.
     this.lock = false;
+}
+
+/**
+ * Runs the cookie-banner checks (scripts/consent.js) and, on a match,
+ * class-tags the real page elements directly — accept+reject for button
+ * asymmetry, the banner container for a missing reject option. Never
+ * clicks anything (see consent.js's checkCookieBanner docstring).
+ */
+async function applyCookieBannerChecks() {
+    const result = await consent.checkCookieBanner();
+
+    if (result.acceptEl && result.rejectEl) {
+        const asymmetry = consent.computeButtonAsymmetry(
+            consent.readStyle(result.acceptEl),
+            consent.readStyle(result.rejectEl)
+        );
+        if (asymmetry.flagged) {
+            result.acceptEl.classList.add(
+                constants.patternDetectedClassName,
+                constants.extensionClassPrefix + "cookie-banner-asymmetry"
+            );
+            result.rejectEl.classList.add(
+                constants.patternDetectedClassName,
+                constants.extensionClassPrefix + "cookie-banner-asymmetry"
+            );
+        }
+    }
+
+    if (result.rejectOptionMissing && result.presentSelector) {
+        // Tag the banner container itself — there's no single "reject
+        // button" element to tag when one is missing. Re-resolve via the
+        // presentMatcher selector already confirmed to match.
+        const bannerEl = document.querySelector(result.presentSelector);
+        if (bannerEl) {
+            bannerEl.classList.add(
+                constants.patternDetectedClassName,
+                constants.extensionClassPrefix + "cookie-banner-missing-reject"
+            );
+        }
+    }
 }
 
 /**

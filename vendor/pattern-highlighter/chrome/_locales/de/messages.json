@@ -157,6 +157,30 @@
     "message": "Eine Preisstufe kostet nur geringfügig mehr als eine benachbarte, bietet aber unverhältnismäßig mehr Leistung – die Nutzer:innen werden so zur teureren Option gelenkt.",
     "description": "Kurze Erklärung des Decoy-Pricing Pattern."
   },
+  "patternCookieBannerAsymmetry_name": {
+    "message": "Cookie-Banner Button-Asymmetrie",
+    "description": "Name des Cookie-Banner-Asymmetrie Pattern."
+  },
+  "patternCookieBannerAsymmetry_infoUrl": {
+    "message": "https://dapde.de/de/dark-patterns/arten-und-beispiele/",
+    "description": "URL zur Erklärung des Cookie-Banner-Asymmetrie Pattern auf der dapde.de Webseite."
+  },
+  "patternCookieBannerAsymmetry_info": {
+    "message": "Der \"Alle akzeptieren\"-Button im Cookie-Banner ist deutlich größer oder kontrastreicher gestaltet als der \"Ablehnen\"-Button, was Nutzer:innen optisch zur Zustimmung drängt.",
+    "description": "Kurze Erklärung des Cookie-Banner-Asymmetrie Pattern."
+  },
+  "patternCookieBannerMissingReject_name": {
+    "message": "Fehlende Reject-Option (Cookie-Banner)",
+    "description": "Name des Fehlende-Reject-Option Pattern."
+  },
+  "patternCookieBannerMissingReject_infoUrl": {
+    "message": "https://dapde.de/de/dark-patterns/arten-und-beispiele/",
+    "description": "URL zur Erklärung des Fehlende-Reject-Option Pattern auf der dapde.de Webseite."
+  },
+  "patternCookieBannerMissingReject_info": {
+    "message": "Das Cookie-Banner bietet keine gleichwertige Möglichkeit, alle nicht notwendigen Cookies mit einem Klick abzulehnen.",
+    "description": "Kurze Erklärung des Fehlende-Reject-Option Pattern."
+  },
   "showPatternState": {
     "message": "$CURRENT$ von $TOTAL$",
     "description": "Anzeige der Nummer des aktuellen Patterns im Popup für die Funktion 'Pattern ansehen'.",

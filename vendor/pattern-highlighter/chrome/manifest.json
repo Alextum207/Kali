@@ -36,7 +36,9 @@
     "web_accessible_resources": [
         {
             "resources": [
-                "scripts/constants.js"
+                "scripts/constants.js",
+                "scripts/consent.js",
+                "data/consent-rules.json"
             ],
             "matches": [
                 "http://*/*",

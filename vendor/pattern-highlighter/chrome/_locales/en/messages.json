@@ -157,6 +157,30 @@
     "message": "A pricing tier costs only slightly more than a neighboring one but offers disproportionately more value, nudging users toward the pricier option.",
     "description": "Brief explanation of the decoy pricing pattern."
   },
+  "patternCookieBannerAsymmetry_name": {
+    "message": "Cookie-Banner Button Asymmetry",
+    "description": "Name of the cookie-banner-asymmetry pattern."
+  },
+  "patternCookieBannerAsymmetry_infoUrl": {
+    "message": "https://dapde.de/en/dark-patterns-en/types-and-examples-en/",
+    "description": "URL to the explanation of the cookie-banner-asymmetry pattern on the dapde.de website."
+  },
+  "patternCookieBannerAsymmetry_info": {
+    "message": "The cookie banner's \"accept all\" button is noticeably larger or higher-contrast than its \"reject\" button, nudging users toward consenting.",
+    "description": "Brief explanation of the cookie-banner-asymmetry pattern."
+  },
+  "patternCookieBannerMissingReject_name": {
+    "message": "Missing Reject Option (Cookie Banner)",
+    "description": "Name of the missing-reject-option pattern."
+  },
+  "patternCookieBannerMissingReject_infoUrl": {
+    "message": "https://dapde.de/en/dark-patterns-en/types-and-examples-en/",
+    "description": "URL to the explanation of the missing-reject-option pattern on the dapde.de website."
+  },
+  "patternCookieBannerMissingReject_info": {
+    "message": "The cookie banner offers no equivalent one-click way to reject all non-essential cookies.",
+    "description": "Brief explanation of the missing-reject-option pattern."
+  },
   "showPatternState": {
     "message": "$CURRENT$ of $TOTAL$",
     "description": "Display the number of the current pattern in the popup for the 'Show patterns' function.",
