@@ -6,7 +6,7 @@
 const brw = chrome;
 
 /**
- * This variable will be dynamically populated with the constants from the other module. 
+ * This variable will be dynamically populated with the constants from the other module.
  * Since the import must be dynamic, the variable cannot be declared as a constant.
  * @type {object} A module namespace object
  */
@@ -16,11 +16,14 @@ let constants;
 initPatternHighlighter();
 
 /**
- * Initialize the extension in the current tab.
+ * Initialize the extension in the current tab: check the activation state
+ * stored by the background script and start highlighting if it is enabled.
+ * The message listener below is registered unconditionally so that a later
+ * live toggle (see `setActivation` handling) works even if the tab started
+ * out deactivated.
  * @returns {Promise<void>}
  */
 async function initPatternHighlighter(){
-    // Ask the background script if the extension should be activated in this tab.
     /**
      * The object that contains the activation state of the extension in the current tab.
      * @constant
@@ -28,50 +31,81 @@ async function initPatternHighlighter(){
      */
     const activationState = await brw.runtime.sendMessage({ action: "getActivationState" });
 
-    // Initialize the extension in the tab if it should be activated.
     if (activationState.isEnabled === true) {
-
-        // Dynamically import the constants from the module.
-        constants = await import(await brw.runtime.getURL("scripts/constants.js"));
-
-        // Check if the pattern configuration is valid.
-        if (!constants.patternConfigIsValid) {
-            // If the configuration is not valid, issue an error message,
-            // do not start pattern highlighting, and exit.
-            console.error(brw.i18n.getMessage("errorInvalidConfig"));
-            return;
-        }
-
-        // Print a message that the pattern highlighter has started.
-        console.log(brw.i18n.getMessage("infoExtensionStarted"));
-
-        // Run the initial pattern check and highlighting.
-        await patternHighlighting();
-
-        // Listen for messages from the popup.
-        brw.runtime.onMessage.addListener(
-            function (message, sender, sendResponse) {
-                // Check which action is requested by the popup.
-                if (message.action === "getPatternCount") {
-                    // Compute the pattern statistics/counts and send the result as response.
-                    sendResponse(getPatternsResults());
-                } else if (message.action === "redoPatternHighlighting") {
-                    // Run the pattern checking and highlighting again,
-                    // send in response that the action has been started.
-                    patternHighlighting();
-                    sendResponse({ started: true });
-                } else if ("showElement" in message) {
-                    // Highlight/show a single pattern element that was selected in the popup.
-                    showElement(message.showElement);
-                    sendResponse({ success: true });
-                }
-            }
-        );
+        await activateHighlighting();
     } else {
         // Print a message that the pattern highlighter is disabled.
-        console.log(brw.i18n.getMessage("infoExtensionDisabled"))
+        console.log(brw.i18n.getMessage("infoExtensionDisabled"));
     }
 }
+
+/**
+ * Loads the pattern configuration (if not already loaded) and runs the
+ * initial pattern check and highlighting. Used both on startup (if the tab
+ * is activated) and when the extension is toggled on live from the popup.
+ * @returns {Promise<void>}
+ */
+async function activateHighlighting() {
+    if (!constants) {
+        // Dynamically import the constants from the module.
+        constants = await import(await brw.runtime.getURL("scripts/constants.js"));
+    }
+
+    // Check if the pattern configuration is valid.
+    if (!constants.patternConfigIsValid) {
+        // If the configuration is not valid, issue an error message,
+        // do not start pattern highlighting, and exit.
+        console.error(brw.i18n.getMessage("errorInvalidConfig"));
+        return;
+    }
+
+    // Print a message that the pattern highlighter has started.
+    console.log(brw.i18n.getMessage("infoExtensionStarted"));
+
+    // Run the initial pattern check and highlighting.
+    await patternHighlighting();
+}
+
+/**
+ * Stops watching the page for changes and removes all pattern highlighting
+ * that is currently shown. Used when the extension is toggled off live from
+ * the popup, so no page reload is needed to apply the change.
+ */
+function deactivateHighlighting() {
+    observer.disconnect();
+    if (constants) {
+        resetDetectedPatterns();
+    }
+}
+
+// Listen for messages from the popup and background script.
+brw.runtime.onMessage.addListener(
+    function (message, sender, sendResponse) {
+        // Check which action is requested by the popup.
+        if (message.action === "getPatternCount") {
+            // Compute the pattern statistics/counts and send the result as response.
+            sendResponse(getPatternsResults());
+        } else if (message.action === "redoPatternHighlighting") {
+            // Run the pattern checking and highlighting again,
+            // send in response that the action has been started.
+            patternHighlighting();
+            sendResponse({ started: true });
+        } else if ("showElement" in message) {
+            // Highlight/show a single pattern element that was selected in the popup.
+            showElement(message.showElement);
+            sendResponse({ success: true });
+        } else if ("setActivation" in message) {
+            // Live-toggle the extension for this tab without requiring a page reload.
+            if (message.setActivation === true) {
+                activateHighlighting().then(() => sendResponse({ success: true }));
+                return true; // Keep the message channel open for the async response.
+            } else {
+                deactivateHighlighting();
+                sendResponse({ success: true });
+            }
+        }
+    }
+);
 
 /**
  * An observer that performs the pattern checking and highlighting after an observed change.
@@ -321,6 +355,12 @@ function getPatternsResults() {
         "countVisible": 0,
         // The total count of detected elements that represent patterns.
         "count": 0,
+    }
+    // The pattern configuration is only loaded once the extension has been
+    // activated at least once in this tab (see `activateHighlighting`).
+    // Return the empty result object if that hasn't happened yet.
+    if (!constants) {
+        return results;
     }
     // Iterate over all patterns in the `patternConfig`.
     for (const pattern of constants.patternConfig.patterns) {

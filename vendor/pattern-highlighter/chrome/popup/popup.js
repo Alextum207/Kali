@@ -155,7 +155,6 @@ export class ExtensionPopup extends LitElement {
         return html`
             <popup-header></popup-header>
             <on-off-switch .activation=${this.activation} .app=${this}></on-off-switch>
-            <refresh-button .hide=${this.activation === this.initActivation} .app=${this}></refresh-button>
             <redo-button .activation=${this.initActivation}></redo-button>
             <found-patterns-list .activation=${this.initActivation} .results=${this.results}></found-patterns-list>
             <show-pattern-button .activation=${this.initActivation} .results=${this.results}></show-pattern-button>
@@ -218,6 +217,9 @@ export class OnOffSwitch extends LitElement {
 
     /**
      * Function that handles a change of the on/off switch value.
+     * Applies the new activation state immediately (persisted in the
+     * background script and live-toggled in the content script), so no
+     * page reload is required for the change to take effect.
      * @param {Event} event
      */
     async changeActivation(event) {
@@ -228,6 +230,15 @@ export class OnOffSwitch extends LitElement {
                 this.activation = activationState.Off;
             }
             this.app.activation = this.activation;
+
+            const enabled = this.activation === activationState.On;
+            const tabId = (await getCurrentTab()).id;
+            // Persist the new activation state for this tab in the background script.
+            await brw.runtime.sendMessage({ "enableExtension": enabled, "tabId": tabId });
+            // Apply the change live in the content script, without a page reload.
+            await brw.tabs.sendMessage(tabId, { "setActivation": enabled });
+
+            this.app.initActivation = this.activation;
         }
     }
 
@@ -252,56 +263,6 @@ export class OnOffSwitch extends LitElement {
 }
 // Define a custom element for the component so that it can be used in the HTML DOM.
 customElements.define("on-off-switch", OnOffSwitch);
-
-/**
- * Lit component for the refresh button of the popup.
- * @extends LitElement
- */
-export class RefreshButton extends LitElement {
-    // Reactive properties
-    static properties = {
-        // Variable that specifies whether the component should be hidden.
-        hide: { type: Boolean },
-        // Variable for the reference to the parent component.
-        app: { type: Object }
-    };
-
-    // CSS styles for the HTML elements in the component.
-    static styles = [
-        sharedStyles,
-        actionButtonStyles
-    ];
-
-    /**
-     * Function to set the activation state for the current tab and to reload it.
-     */
-    async refreshTab() {
-        // Set the activation state for the current tab.
-        await brw.runtime.sendMessage({ "enableExtension": this.app.activation === activationState.On, "tabId": (await getCurrentTab()).id });
-        // Reload the current tab.
-        await brw.tabs.reload();
-        // Set the initial activation state of the popup to the new activation state.
-        this.app.initActivation = this.app.activation;
-    }
-
-    /**
-     * Render the HTML of the component.
-     * @returns {html} HTML of the component
-     */
-    render() {
-        // Return an empty string if the component should be hidden.
-        if (this.hide) {
-            return html``;
-        }
-        return html`
-        <div>
-            <span @click=${this.refreshTab}>${brw.i18n.getMessage("buttonReloadPageForChange")}</span>
-        </div>
-        `;
-    }
-}
-// Define a custom element for the component so that it can be used in the HTML DOM.
-customElements.define("refresh-button", RefreshButton);
 
 /**
  * Lit component for the redo button of the popup.
