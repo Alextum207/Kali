@@ -401,6 +401,11 @@ export const patternConfig = {
                     const priceRe = /(?:€\s?(\d{1,3}(?:\.\d{3})*,\d{2})|(\d{1,3}(?:\.\d{3})*,\d{2})\s?€|EUR\s?(\d{1,3}(?:\.\d{3})*,\d{2})|(\d{1,3}(?:\.\d{3})*,\d{2})\s?EUR)/i;
 
                     function tierInfo(container) {
+                        // Only HTMLElement has `innerText` (e.g. SVGElement does not),
+                        // and findPatternDeep visits every element node in the tree.
+                        if (typeof container.innerText !== "string") {
+                            return null;
+                        }
                         const priceMatch = container.innerText.match(priceRe);
                         const list = container.querySelector("ul, ol");
                         if (!priceMatch || !list) {
