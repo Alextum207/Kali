@@ -349,6 +349,36 @@ async def test_crawl_site_respects_max_pages_limit(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_crawl_site_passes_nav_timeout_to_goto(tmp_path, monkeypatch):
+    # Playwright's own default navigation timeout (30s) is longer than the
+    # crawl's own SCAN_TIME_BUDGET_SECONDS default (25s) — crawl_site must
+    # bound page.goto with the explicit NAV_TIMEOUT_MS constant instead of
+    # falling back to Playwright's default.
+    from playwright.async_api import Page
+
+    from app.crawler import NAV_TIMEOUT_MS
+
+    calls = []
+    original_goto = Page.goto
+
+    async def spy_goto(self, url, **kwargs):
+        calls.append(kwargs)
+        return await original_goto(self, url, **kwargs)
+
+    monkeypatch.setattr(Page, "goto", spy_goto)
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        await crawl_site(
+            TWO_PAGE_SITE_URL, browser, max_pages=1, har_dir=str(tmp_path),
+            url_validator=lambda url: None,
+        )
+        await browser.close()
+
+    assert calls and calls[0].get("timeout") == NAV_TIMEOUT_MS
+
+
+@pytest.mark.asyncio
 async def test_crawl_site_stops_discovering_when_time_budget_exceeded(tmp_path):
     # 1.0s is comfortably longer than browser/context startup (so the start
     # page is still visited) but shorter than that one page's own processing

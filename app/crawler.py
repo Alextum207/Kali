@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import os
 import pathlib
 import tempfile
 import uuid
@@ -12,6 +13,14 @@ logger = logging.getLogger(__name__)
 DEFAULT_CONSENT_RULES_DIR = str(
     pathlib.Path(__file__).resolve().parent.parent / "data" / "consent_rules"
 )
+
+# Playwright's own default navigation timeout is 30000ms — too long
+# relative to SCAN_TIME_BUDGET_SECONDS (25s default in site_crawler.py):
+# one dead/slow page could burn more wall-clock than the whole scan's
+# nominal budget. 12s leaves headroom under the 25s budget for routing/
+# flow-walk work on the same page while still tolerating legitimately
+# slow-but-real sites.
+NAV_TIMEOUT_MS = int(os.environ.get("NAV_TIMEOUT_MS", "12000"))
 
 # Best-effort keywords for identifying a "reject/decline all" click target when
 # a Consent-O-Matic rule doesn't carry an explicit reject hint.
@@ -262,7 +271,7 @@ async def crawl_page(
 
     context = await browser.new_context(record_har_path=har_path)
     page = await context.new_page()
-    await page.goto(url, wait_until="domcontentloaded")
+    await page.goto(url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
 
     await apply_consent_rules(page, consent_rules_dir)
 

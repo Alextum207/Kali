@@ -12,6 +12,7 @@ from bs4 import BeautifulSoup
 
 from app.crawler import (
     DEFAULT_CONSENT_RULES_DIR,
+    NAV_TIMEOUT_MS,
     CaptchaRequiredError,
     _looks_like_captcha,
     _snapshot_page,
@@ -290,7 +291,12 @@ async def _walk_category_flow(
                 break
             before_url = page.url
             await el.click(timeout=2000)
-            await asyncio.sleep(1.0)
+            # ponytail: unmeasured guess, not benchmarked against real
+            # scans — matches the settle-wait duration already used for
+            # _check_infinite_scroll's scroll sleeps (site_crawler.py:241);
+            # tune with real timing data if flows still misfire or this
+            # proves wastefully long.
+            await asyncio.sleep(0.5)
         except Exception as exc:  # noqa: BLE001 - deliberate broad catch, page state can vary
             logger.debug("crawl_site: flow interaction click failed: %s", exc)
             break
@@ -378,7 +384,7 @@ async def crawl_site(
 
             page = await context.new_page()
             try:
-                await page.goto(url, wait_until="domcontentloaded")
+                await page.goto(url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
             except Exception as exc:  # noqa: BLE001 - deliberate broad catch, a dead link shouldn't kill the crawl
                 logger.warning("crawl_site: failed to load %r: %s", url, exc)
                 await page.close()
