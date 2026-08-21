@@ -47,7 +47,11 @@ Jeder Fund soll folgende Datenstruktur haben: `pattern_type`, `target_norm`,
   `file://`) bevor sie an Playwright geht.
 - **Modul B – Visuelle/Layout-Analyse** (`app/analysis/visual.py`,
   `app/analysis/heuristics.py`): Kontrastberechnung, Button-Style-Vergleich,
-  Trick-Questions/Autoplay/Low-Contrast-Legal-Text-Heuristiken.
+  Trick-Questions/Autoplay/Low-Contrast-Legal-Text-/Decoy-Pricing-
+  Heuristiken (`find_decoy_pricing` — strukturelle Preistabellen-Erkennung,
+  Geschwister-Preiskarten mit `<ul>/<ol>`, flag bei ≤15% Preisunterschied
+  und ≥3× Value-Verhältnis; deutsche Preisformate only, siehe
+  `# ponytail:`-Kommentar davor für die dokumentierte Erkennungsgrenze).
 - **Modul C – Beweissicherung** (`app/evidence.py`): Screenshot/DOM-Hashing
   (SHA-256), RFC-3161-Zeitstempel (best-effort), HAR-Aufzeichnung pro Scan.
   Caching ist bewusst nur für Crawl-Routing erlaubt (Modul A), nie für
@@ -87,10 +91,21 @@ Modul-Aufteilung oben).
 ## Vorhandene Open-Source-Bausteine als Referenz
 Details in `Bestehende Dark-Pattern-Erkennungs-Projekte.md`. Kurzüberblick:
 - **Dapde Pattern-Highlighter** – clientseitig, zeitversetzter DOM-Vergleich (Countdowns, Scarcity);
-  komplettes Repo als inertes Referenzmaterial (für eine künftige Kali-
-  Browser-Extension) unter `vendor/pattern-highlighter/` vendored, dessen
+  komplettes Repo unter `vendor/pattern-highlighter/` vendored, dessen
   DE/EN-Regex-Tabelle zusätzlich handportiert in `app/analysis/regex_classify.py`
-  läuft (siehe Kernmodule oben) — kein Import-Pfad aus `app/` zeigt auf `vendor/`
+  läuft (siehe Kernmodule oben) — kein Import-Pfad aus `app/` zeigt auf
+  `vendor/`. Die vendorte Kopie ist inzwischen selbst eine aktive,
+  eigenständige Kali-Browser-Extension (nicht mehr nur inertes
+  Referenzmaterial): `vendor/pattern-highlighter/chrome/scripts/constants.js`
+  wurde um 4 weitere Pattern-Typen erweitert (Pre-ticked Box, Autoplay,
+  Trick Questions, Decoy Pricing — JS-Ports derselben Erkennungslogik wie
+  `app/analysis/heuristics.py`), rein deklarativ über `patternConfig`
+  (`content.js` unverändert, iteriert generisch). Bewusst ohne die 6
+  LLM-Typen, damit die Extension komplett lokal bleibt (kein
+  Backend-/API-Call). `tagBlacklist` (`constants.js`) enthält kein
+  `audio`/`video` mehr (war für Autoplay-Erkennung blockierend). Kein
+  automatisiertes JS-Test-Setup vorhanden — Verifikation nur manuell
+  (`chrome://extensions` → entpackt laden)
 - **Consent-O-Matic** – CMP-/Cookie-Banner-Erkennung via JSON-Regeln + CSS-Selektoren
 - **OpenWPM / "Dark Patterns at Scale"** (Princeton) – serverseitiger Crawler, große Skalierung, Vorbild für Modul A
 - **Kachastepien NLP-Classifier** – TF-IDF + Logistic Regression für manipulative Texte
@@ -106,9 +121,10 @@ Details in `Bestehende Dark-Pattern-Erkennungs-Projekte.md`. Kurzüberblick:
   `docs/superpowers/plans/` — zugehörige Implementierungspläne
 - `app/`, `tests/` — Implementierung (siehe Kernmodule oben) und Testsuite
 - `data/consent_rules/` — Consent-O-Matic-Cookie-Banner-Regeln (Referenzdaten)
-- `vendor/pattern-highlighter/` — komplette Kopie von Dapde/Pattern-Highlighter
-  (MIT), inertes Referenzmaterial für eine künftige Browser-Extension; die
-  Regex-Erkennung selbst läuft handportiert in `app/analysis/regex_classify.py`
+- `vendor/pattern-highlighter/` — Fork von Dapde/Pattern-Highlighter (MIT),
+  inzwischen aktive Kali-Browser-Extension (8 Pattern-Typen, siehe oben);
+  die Regex-Erkennung der ursprünglichen 4 läuft zusätzlich handportiert
+  serverseitig in `app/analysis/regex_classify.py`
 - `datasets/` — externer CSV-Trainingsdatensatz (nicht projekteigen, per
   `.gitignore` vom Repo ausgeschlossen)
 
@@ -157,3 +173,16 @@ Pattern-Highlighter übernommen (siehe oben). Ein selbst-trainiertes,
 schlankes Modell (TF-IDF+LogReg) für die verbleibenden 6 LLM-Typen ist als
 separater, späterer Task angedacht, nicht Teil dieses Changes. Test-Stand:
 146 passed, 1 skipped (GTK).
+
+**Decoy-Pricing-Heuristik + erweiterte Extension (Stand 2026-08-21):**
+`find_decoy_pricing` (`app/analysis/heuristics.py`) macht Decoy Pricing zum
+5. deterministischen Typ (neben den 4 Regex-Typen) — einziger der 6
+verbleibenden LLM-Typen, der strukturell statt sprachlich erkennbar ist
+(Nagging/Roach Motel/Forced Path bräuchten Mehrseiten-Flow, Confirm
+Shaming ist reine Tonalität, Sneaking/Hidden Costs zu kontextabhängig).
+Parallel wurde `vendor/pattern-highlighter/` von reinem Referenzmaterial
+zur aktiven, eigenständigen Extension ausgebaut (4 zusätzliche Pattern-
+Typen, siehe Bausteine-Abschnitt oben) — bewusst nur die deterministischen
+Typen, damit die Extension ohne Backend-Verbindung auskommt. Test-Stand:
+150 passed, 1 skipped (GTK). Offen: manueller Extension-Smoke-Test
+(`chrome://extensions`), noch nicht durchgeführt.
