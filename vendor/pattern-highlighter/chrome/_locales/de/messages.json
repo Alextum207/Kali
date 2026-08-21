@@ -109,6 +109,54 @@
     "message": "Das Forced Continuity-Dark Pattern verlängert kostenlose oder günstig Probeabonnements automatisch – allerdings kostenpflichtig bzw. zu einem höheren Preis. Der Designtrick liegt darin, dass das Bestellformular auch optisch Kostenlosigkeit suggeriert und die (automatischen) Folgekosten verschleiert.",
     "description": "Kurze Erklärung des Forced Continuity Pattern."
   },
+  "patternPreTickedBox_name": {
+    "message": "Vorausgewählte Checkbox",
+    "description": "Name des Pre-ticked-Box Pattern."
+  },
+  "patternPreTickedBox_infoUrl": {
+    "message": "https://dapde.de/de/dark-patterns/arten-und-beispiele/",
+    "description": "URL zur Erklärung des Pre-ticked-Box Pattern auf der dapde.de Webseite."
+  },
+  "patternPreTickedBox_info": {
+    "message": "Eine standardmäßig angehakte Checkbox verleitet Nutzer:innen dazu, einer Sache (z.B. einem Newsletter) zuzustimmen, ohne eine aktive Wahl zu treffen.",
+    "description": "Kurze Erklärung des Pre-ticked-Box Pattern."
+  },
+  "patternAutoplay_name": {
+    "message": "Autoplay",
+    "description": "Name des Autoplay Pattern."
+  },
+  "patternAutoplay_infoUrl": {
+    "message": "https://dapde.de/de/dark-patterns/arten-und-beispiele/",
+    "description": "URL zur Erklärung des Autoplay Pattern auf der dapde.de Webseite."
+  },
+  "patternAutoplay_info": {
+    "message": "Video- oder Audio-Elemente, die automatisch abspielen, binden die Aufmerksamkeit der Nutzer:innen ohne aktive Entscheidung.",
+    "description": "Kurze Erklärung des Autoplay Pattern."
+  },
+  "patternTrickQuestions_name": {
+    "message": "Trickfragen",
+    "description": "Name des Trick-Questions Pattern."
+  },
+  "patternTrickQuestions_infoUrl": {
+    "message": "https://dapde.de/de/dark-patterns/arten-und-beispiele/",
+    "description": "URL zur Erklärung des Trick-Questions Pattern auf der dapde.de Webseite."
+  },
+  "patternTrickQuestions_info": {
+    "message": "Benachbarte Checkboxen, deren Beschriftungen die Verneinungs-Polarität wechseln, sodass eine einheitlich wirkende Checkbox-Liste bei schnellem Lesen das Gegenteil des Gemeinten bedeutet.",
+    "description": "Kurze Erklärung des Trick-Questions Pattern."
+  },
+  "patternDecoyPricing_name": {
+    "message": "Lockangebot-Preisgestaltung",
+    "description": "Name des Decoy-Pricing Pattern."
+  },
+  "patternDecoyPricing_infoUrl": {
+    "message": "https://dapde.de/de/dark-patterns/arten-und-beispiele/",
+    "description": "URL zur Erklärung des Decoy-Pricing Pattern auf der dapde.de Webseite."
+  },
+  "patternDecoyPricing_info": {
+    "message": "Eine Preisstufe kostet nur geringfügig mehr als eine benachbarte, bietet aber unverhältnismäßig mehr Leistung – die Nutzer:innen werden so zur teureren Option gelenkt.",
+    "description": "Kurze Erklärung des Decoy-Pricing Pattern."
+  },
   "showPatternState": {
     "message": "$CURRENT$ von $TOTAL$",
     "description": "Anzeige der Nummer des aktuellen Patterns im Popup für die Funktion 'Pattern ansehen'.",

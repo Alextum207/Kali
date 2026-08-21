@@ -279,6 +279,161 @@ export const patternConfig = {
                 "en",
                 "de"
             ]
+        },
+        {
+            /**
+             * Pre-ticked Box Pattern.
+             * A checkbox that is checked by default, tricking the user into
+             * consenting to something (e.g. a newsletter) without an active choice.
+             * Ported from Kali's app/analysis/heuristics.py:find_preticked_checkboxes.
+             */
+            name: brw.i18n.getMessage("patternPreTickedBox_name"),
+            className: "pre-ticked-box",
+            detectionFunctions: [
+                function (node, nodeOld) {
+                    return node.tagName === "INPUT" && node.type === "checkbox" && node.checked;
+                }
+            ],
+            infoUrl: brw.i18n.getMessage("patternPreTickedBox_infoUrl"),
+            info: brw.i18n.getMessage("patternPreTickedBox_info"),
+            languages: [
+                "en",
+                "de"
+            ]
+        },
+        {
+            /**
+             * Autoplay Pattern (Exploiting Addiction).
+             * Video/audio elements that start playing automatically, binding
+             * the user's attention without an active choice.
+             * Ported from Kali's app/analysis/heuristics.py:find_autoplay_media.
+             */
+            name: brw.i18n.getMessage("patternAutoplay_name"),
+            className: "autoplay",
+            detectionFunctions: [
+                function (node, nodeOld) {
+                    return (node.tagName === "VIDEO" || node.tagName === "AUDIO") && node.hasAttribute("autoplay");
+                }
+            ],
+            infoUrl: brw.i18n.getMessage("patternAutoplay_infoUrl"),
+            info: brw.i18n.getMessage("patternAutoplay_info"),
+            languages: [
+                "en",
+                "de"
+            ]
+        },
+        {
+            /**
+             * Trick Questions Pattern.
+             * Adjacent checkboxes whose labels switch negation polarity (one
+             * phrased as opt-in, the next as opt-out), so a consistent-looking
+             * checkbox list actually means the opposite of what a quick scan suggests.
+             * Ported from Kali's app/analysis/heuristics.py:find_trick_questions.
+             */
+            name: brw.i18n.getMessage("patternTrickQuestions_name"),
+            className: "trick-questions",
+            detectionFunctions: [
+                function (node, nodeOld) {
+                    if (node.tagName !== "INPUT" || node.type !== "checkbox") {
+                        return false;
+                    }
+                    /**
+                     * Regular expression for negation keywords, mirroring
+                     * app/analysis/heuristics.py's _NEGATION_KEYWORDS.
+                     * @constant
+                     */
+                    const negationRe = /\b(nicht|kein|keine|ohne|niemals|verzicht|not|don't|do not)/i;
+
+                    function labelTextFor(checkbox) {
+                        if (checkbox.id) {
+                            const label = checkbox.getRootNode().querySelector(`label[for="${checkbox.id}"]`);
+                            if (label) {
+                                return label.innerText;
+                            }
+                        }
+                        const parentLabel = checkbox.closest("label");
+                        return parentLabel ? parentLabel.innerText : "";
+                    }
+
+                    // Find the next adjacent checkbox sibling to compare against.
+                    let sibling = node.nextElementSibling;
+                    while (sibling && !(sibling.tagName === "INPUT" && sibling.type === "checkbox")) {
+                        sibling = sibling.nextElementSibling;
+                    }
+                    if (!sibling) {
+                        return false;
+                    }
+
+                    const textA = labelTextFor(node);
+                    const textB = labelTextFor(sibling);
+                    if (!textA || !textB) {
+                        return false;
+                    }
+                    return negationRe.test(textA) !== negationRe.test(textB);
+                }
+            ],
+            infoUrl: brw.i18n.getMessage("patternTrickQuestions_infoUrl"),
+            info: brw.i18n.getMessage("patternTrickQuestions_info"),
+            languages: [
+                "en",
+                "de"
+            ]
+        },
+        {
+            /**
+             * Decoy Pricing Pattern.
+             * A pricing tier priced only slightly more than a neighboring
+             * tier but offering disproportionately more value, nudging the
+             * user toward the pricier option (asymmetric dominance).
+             * Ported from Kali's app/analysis/heuristics.py:find_decoy_pricing.
+             * Only German price formats are supported (see the Python
+             * counterpart for the reasoning).
+             */
+            name: brw.i18n.getMessage("patternDecoyPricing_name"),
+            className: "decoy-pricing",
+            detectionFunctions: [
+                function (node, nodeOld) {
+                    /**
+                     * Regular expression for German price formats
+                     * (9,99€ / € 9,99 / EUR 9,99 / 9,99 EUR).
+                     * @constant
+                     */
+                    const priceRe = /(?:€\s?(\d{1,3}(?:\.\d{3})*,\d{2})|(\d{1,3}(?:\.\d{3})*,\d{2})\s?€|EUR\s?(\d{1,3}(?:\.\d{3})*,\d{2})|(\d{1,3}(?:\.\d{3})*,\d{2})\s?EUR)/i;
+
+                    function tierInfo(container) {
+                        const priceMatch = container.innerText.match(priceRe);
+                        const list = container.querySelector("ul, ol");
+                        if (!priceMatch || !list) {
+                            return null;
+                        }
+                        const price = parseFloat(priceMatch[0].replace(/[^\d,]/g, "").replace(",", "."));
+                        return { price: price, valueCount: list.querySelectorAll("li").length };
+                    }
+
+                    const info = tierInfo(node);
+                    if (!info) {
+                        return false;
+                    }
+                    let sibling = node.nextElementSibling;
+                    while (sibling) {
+                        const siblingInfo = tierInfo(sibling);
+                        if (siblingInfo) {
+                            const cheaper = info.price < siblingInfo.price ? info : siblingInfo;
+                            const pricier = info.price < siblingInfo.price ? siblingInfo : info;
+                            const priceDeltaPct = (pricier.price - cheaper.price) / cheaper.price;
+                            const valueRatio = pricier.valueCount / Math.max(cheaper.valueCount, 1);
+                            return priceDeltaPct <= 0.15 && valueRatio >= 3.0;
+                        }
+                        sibling = sibling.nextElementSibling;
+                    }
+                    return false;
+                }
+            ],
+            infoUrl: brw.i18n.getMessage("patternDecoyPricing_infoUrl"),
+            info: brw.i18n.getMessage("patternDecoyPricing_info"),
+            languages: [
+                "de"
+            ]
         }
     ]
 }
@@ -368,4 +523,4 @@ export const currentPatternClassName = extensionClassPrefix + "current-pattern";
  * A list of HTML tags that should be ignored during pattern detection.
  * The elements with these tags are removed from the DOM copy.
  */
-export const tagBlacklist = ["script", "style", "noscript", "audio", "video"];
+export const tagBlacklist = ["script", "style", "noscript"];

@@ -5,6 +5,7 @@ from app.analysis.heuristics import (
     find_countdown_elements,
     find_trick_questions,
     find_autoplay_media,
+    find_decoy_pricing,
 )
 from app.analysis.readability import flag_complex_language
 from app.analysis.text_extract import extract_main_text
@@ -55,6 +56,7 @@ async def run_analysis(
     findings.extend(find_countdown_elements(dom_html))
     findings.extend(find_trick_questions(dom_html))
     findings.extend(find_autoplay_media(dom_html))
+    findings.extend(find_decoy_pricing(dom_html))
 
     main_text = extract_main_text(dom_html)
     findings.extend(find_regex_patterns(main_text))

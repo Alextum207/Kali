@@ -3,6 +3,7 @@ from app.analysis.heuristics import (
     find_countdown_elements,
     find_trick_questions,
     find_autoplay_media,
+    find_decoy_pricing,
 )
 
 PRETICKED_HTML = """
@@ -94,3 +95,72 @@ def test_find_autoplay_media_flags_autoplay_attribute():
     selectors = {f["evidence_data"]["selector"] for f in findings}
     assert selectors == {"#hero-video", "#bg-audio"}
     assert all(f["pattern_type"] == "Exploiting Addiction (Autoplay)" for f in findings)
+
+
+DECOY_PRICING_HTML = """
+<div class="pricing-row">
+  <div class="plan" id="basic">
+    <p>Basic-Paket: 9,99€</p>
+    <ul><li>Feature A</li></ul>
+  </div>
+  <div class="plan" id="pro">
+    <p>Pro-Paket: 10,99€</p>
+    <ul>
+      <li>Feature A</li><li>Feature B</li><li>Feature C</li><li>Feature D</li>
+      <li>Feature E</li><li>Feature F</li><li>Feature G</li><li>Feature H</li>
+      <li>Feature I</li><li>Feature J</li><li>Feature K</li><li>Feature L</li>
+      <li>Feature M</li><li>Feature N</li><li>Feature O</li>
+    </ul>
+  </div>
+</div>
+"""
+
+PROPORTIONAL_PRICING_HTML = """
+<div class="pricing-row">
+  <div class="plan" id="basic">
+    <p>Basic-Paket: 9,99€</p>
+    <ul><li>Feature A</li><li>Feature B</li></ul>
+  </div>
+  <div class="plan" id="premium">
+    <p>Premium-Paket: 14,99€</p>
+    <ul><li>Feature A</li><li>Feature B</li><li>Feature C</li><li>Feature D</li></ul>
+  </div>
+</div>
+"""
+
+SINGLE_TIER_HTML = """
+<div class="pricing-row">
+  <div class="plan" id="only"><p>9,99€</p><ul><li>Feature A</li></ul></div>
+</div>
+"""
+
+NO_PRICE_HTML = """
+<div class="pricing-row">
+  <div class="plan"><p>Kontaktieren Sie uns</p><ul><li>Feature A</li></ul></div>
+  <div class="plan"><p>Individuell</p><ul><li>Feature A</li><li>Feature B</li></ul></div>
+</div>
+"""
+
+
+def test_find_decoy_pricing_flags_asymmetric_dominance():
+    findings = find_decoy_pricing(DECOY_PRICING_HTML)
+    assert len(findings) == 1
+    finding = findings[0]
+    assert finding["pattern_type"] == "Decoy Pricing"
+    assert finding["confidence_score"] == 0.6
+    assert finding["evidence_data"]["cheaper_price"] == 9.99
+    assert finding["evidence_data"]["pricier_price"] == 10.99
+    assert finding["evidence_data"]["cheaper_value_count"] == 1
+    assert finding["evidence_data"]["pricier_value_count"] == 15
+
+
+def test_find_decoy_pricing_ignores_proportional_tiers():
+    assert find_decoy_pricing(PROPORTIONAL_PRICING_HTML) == []
+
+
+def test_find_decoy_pricing_single_tier_no_finding():
+    assert find_decoy_pricing(SINGLE_TIER_HTML) == []
+
+
+def test_find_decoy_pricing_no_currency_no_finding():
+    assert find_decoy_pricing(NO_PRICE_HTML) == []
