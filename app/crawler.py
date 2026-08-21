@@ -35,6 +35,27 @@ _REJECT_KEYWORDS = (
     "alle ablehnen",
 )
 
+# Mirrors _REJECT_KEYWORDS for "accept all" click targets, used only to read
+# the accept button's style for button-asymmetry detection — never to click
+# it (clicking would grant consent, a policy line this tool must not cross
+# just to capture a screenshot).
+# ponytail: keyword matching only resolves a concrete accept/reject
+# selector on a small minority of the 204 vendored rules (reject: 2/204,
+# accept: an estimated ~10/204) — most sites model consent via per-category
+# checkbox toggles + a "save" click (`"type": "consent"` nodes) rather than
+# a single accept/reject button. Upgrade path: drive that toggle+save flow
+# instead of only matching a single click target, if recall on real scans
+# turns out to matter more than the speed/simplicity of this pass.
+_ACCEPT_KEYWORDS = (
+    "accept all",
+    "agree",
+    "akzeptieren",
+    "zustimmen",
+    "alle akzeptieren",
+    "allow all",
+    "einverstanden",
+)
+
 LEGAL_TEXT_KEYWORDS = (
     "kündigung",
     "widerruf",
@@ -114,6 +135,29 @@ def _looks_like_reject(hint) -> bool:
     return any(kw in joined for kw in _REJECT_KEYWORDS)
 
 
+def _looks_like_accept(hint) -> bool:
+    if not hint:
+        return False
+    texts = hint if isinstance(hint, list) else [hint]
+    joined = " ".join(str(t) for t in texts).lower()
+    return any(kw in joined for kw in _ACCEPT_KEYWORDS)
+
+
+def _has_consent_toggle(node) -> bool:
+    """Structural signal that a rule models consent via per-category
+    checkbox toggles + a save action (the dominant pattern across the
+    vendored rules, see the ponytail note on _ACCEPT_KEYWORDS) rather than
+    a single reject click. Used to avoid flagging "no reject option" on a
+    site that does offer one, just not as a single click target."""
+    if isinstance(node, dict):
+        if node.get("type") == "consent":
+            return True
+        return any(_has_consent_toggle(value) for value in node.values())
+    elif isinstance(node, list):
+        return any(_has_consent_toggle(item) for item in node)
+    return False
+
+
 # A bare tag-name selector like "button" is only safe to click when the
 # rule's own `parent` scoping narrows it to a specific container (e.g.
 # Reddit's rule scopes "button" to the <section> that also contains the
@@ -161,20 +205,54 @@ def _scoped_selector(action: dict) -> str | None:
     return base
 
 
-async def apply_consent_rules(page, rules_dir: str = DEFAULT_CONSENT_RULES_DIR) -> None:
-    """Best-effort cookie-banner rejection using vendored Consent-O-Matic rules.
+async def _matches_present_detector(page, data: dict) -> tuple[str, str] | None:
+    """Returns (vendor_key, matched_selector) for the first of this rule's
+    `presentMatcher` selectors that currently matches an element on the
+    page, or None if the rule's banner isn't actually present here."""
+    for key, value in data.items():
+        if key == "$schema" or not isinstance(value, dict):
+            continue
+        for detector in value.get("detectors", []):
+            for matcher in detector.get("presentMatcher", []):
+                selector = matcher.get("target", {}).get("selector")
+                if not selector:
+                    continue
+                try:
+                    el = await page.query_selector(selector)
+                except Exception as exc:
+                    logger.debug("_matches_present_detector: selector %r failed: %s", selector, exc)
+                    continue
+                if el:
+                    return key, selector
+    return None
 
-    Loads every JSON rule file in `rules_dir`, extracts click targets that look
-    like a "reject/decline" action, and clicks the first one found on the page.
-    Never raises: a non-matching site or malformed rule file is logged and
-    skipped so it can never break a crawl.
+
+async def apply_consent_rules(page, rules_dir: str = DEFAULT_CONSENT_RULES_DIR) -> dict:
+    """Best-effort cookie-banner rejection using vendored Consent-O-Matic rules,
+    plus (for whichever rule's banner is actually detected present on the
+    page) capturing real accept/reject button styles for button-asymmetry
+    detection and flagging a structurally-missing reject option.
+
+    Loads every JSON rule file in `rules_dir`, skips any whose `presentMatcher`
+    doesn't match this page, and for the remainder extracts click targets that
+    look like a "reject/decline" action, clicking the first visible one found.
+    Accept-shaped targets are located and their style read, but never clicked
+    (clicking would grant consent). Never raises: a non-matching site or
+    malformed rule file is logged and skipped so it can never break a crawl.
+
+    Returns a dict with `accept_style`/`reject_style` (each a style dict from
+    `_read_style`, or None if not found) and `reject_option_missing` (True
+    only when a rule's banner was confirmed present but neither a reject
+    click target nor a consent-toggle structure was found for it).
     """
+    result = {"accept_style": None, "reject_style": None, "reject_option_missing": False}
     try:
         rules_path = pathlib.Path(rules_dir)
         if not rules_path.is_dir():
             logger.warning("apply_consent_rules: rules dir not found: %s", rules_dir)
-            return
+            return result
 
+        clicked_reject = False
         for rule_file in sorted(rules_path.glob("*.json")):
             try:
                 data = json.loads(rule_file.read_text(encoding="utf-8"))
@@ -182,29 +260,50 @@ async def apply_consent_rules(page, rules_dir: str = DEFAULT_CONSENT_RULES_DIR) 
                 logger.warning("apply_consent_rules: skipping unparseable %s: %s", rule_file, exc)
                 continue
 
+            present = await _matches_present_detector(page, data)
+            if present is None:
+                continue
+
+            found_reject_candidate = False
             for action in _iter_click_candidates(data):
                 hint = action.get("target", {}).get("textFilter") or action.get("type")
-                if not _looks_like_reject(hint):
-                    continue
                 selector = _scoped_selector(action)
                 if not selector:
                     continue
-                try:
-                    el = await page.query_selector(selector)
-                    if el and await el.is_visible():
-                        await el.click(timeout=1000)
-                        logger.info(
-                            "apply_consent_rules: clicked %r from %s", selector, rule_file.name
-                        )
-                        return
-                except Exception as exc:
-                    logger.debug("apply_consent_rules: selector %r failed: %s", selector, exc)
-                    continue
+
+                if _looks_like_reject(hint):
+                    found_reject_candidate = True
+                    if clicked_reject:
+                        continue
+                    try:
+                        el = await page.query_selector(selector)
+                        if el and await el.is_visible():
+                            result["reject_style"] = await _read_style(page, selector)
+                            await el.click(timeout=1000)
+                            logger.info(
+                                "apply_consent_rules: clicked %r from %s", selector, rule_file.name
+                            )
+                            clicked_reject = True
+                    except Exception as exc:
+                        logger.debug("apply_consent_rules: selector %r failed: %s", selector, exc)
+                elif result["accept_style"] is None and _looks_like_accept(hint):
+                    try:
+                        el = await page.query_selector(selector)
+                        if el and await el.is_visible():
+                            result["accept_style"] = await _read_style(page, selector)
+                    except Exception as exc:
+                        logger.debug("apply_consent_rules: selector %r failed: %s", selector, exc)
+
+            if not found_reject_candidate and not _has_consent_toggle(data):
+                result["reject_option_missing"] = True
+
+        return result
     except Exception as exc:  # pragma: no cover - defensive catch-all
         logger.warning("apply_consent_rules: best-effort pass failed: %s", exc)
+        return result
 
 
-async def _snapshot_page(page, skip_diff_sleep: bool = False) -> dict:
+async def _snapshot_page(page, skip_diff_sleep: bool = False, consent_result: dict | None = None) -> dict:
     dom_before = await page.content()
     if not skip_diff_sleep:
         await asyncio.sleep(1.5)  # Dapde principle: catch script-driven DOM changes
@@ -212,11 +311,20 @@ async def _snapshot_page(page, skip_diff_sleep: bool = False) -> dict:
 
     screenshot = await page.screenshot()
 
+    consent_result = consent_result or {}
+    accept_style = consent_result.get("accept_style")
+    reject_style = consent_result.get("reject_style")
     button_styles = None
-    accept_style = await _read_style(page, "#accept")
-    reject_style = await _read_style(page, "#reject")
     if accept_style and reject_style:
         button_styles = {"accept": accept_style, "reject": reject_style}
+    else:
+        # Fallback for sites apply_consent_rules found no rule-resolved pair
+        # for (including the local test fixture, which genuinely uses these
+        # literal IDs).
+        accept_style = await _read_style(page, "#accept")
+        reject_style = await _read_style(page, "#reject")
+        if accept_style and reject_style:
+            button_styles = {"accept": accept_style, "reject": reject_style}
 
     try:
         contrast_findings = await find_low_contrast_legal_text(page)
@@ -230,6 +338,7 @@ async def _snapshot_page(page, skip_diff_sleep: bool = False) -> dict:
         "screenshot": screenshot,
         "button_styles": button_styles,
         "contrast_findings": contrast_findings,
+        "reject_option_missing": consent_result.get("reject_option_missing", False),
     }
 
 
@@ -273,9 +382,9 @@ async def crawl_page(
     page = await context.new_page()
     await page.goto(url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
 
-    await apply_consent_rules(page, consent_rules_dir)
+    consent_result = await apply_consent_rules(page, consent_rules_dir)
 
-    snapshot = await _snapshot_page(page)
+    snapshot = await _snapshot_page(page, consent_result=consent_result)
 
     await page.close()
     await context.close()  # flushes the HAR file to disk

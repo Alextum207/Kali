@@ -37,6 +37,41 @@ def _read_and_hash(path: str) -> str:
         return sha256_bytes(f.read())
 
 
+def _crawl_time_findings(page_data: dict) -> list[dict]:
+    """Findings that depend on crawl-time state run_analysis never sees
+    (contrast scan, infinite-scroll, missing cookie-banner reject option) —
+    shared by run_scan (single page) and _analyze_page (site crawl) so
+    neither path silently drops them."""
+    findings = []
+    for contrast_finding in page_data.get("contrast_findings", []):
+        contrast_finding["target_norm"] = map_to_norm(contrast_finding["pattern_type"])
+        contrast_finding["evidence_data"]["impact"] = IMPACT_MAP.get(contrast_finding["pattern_type"], "–")
+        findings.append(contrast_finding)
+
+    if page_data.get("infinite_scroll_detected"):
+        findings.append({
+            "pattern_type": "Exploiting Addiction (Infinite Scroll)",
+            "target_norm": map_to_norm("Exploiting Addiction (Infinite Scroll)"),
+            "confidence_score": 0.6,
+            "evidence_data": {
+                "note": "document height grew across 3 scroll iterations without an end indicator",
+                "impact": IMPACT_MAP.get("Exploiting Addiction (Infinite Scroll)", "–"),
+            },
+        })
+
+    if page_data.get("reject_option_missing"):
+        findings.append({
+            "pattern_type": "Fehlende Reject-Option (Cookie-Banner)",
+            "target_norm": map_to_norm("Fehlende Reject-Option (Cookie-Banner)"),
+            "confidence_score": 0.5,
+            "evidence_data": {
+                "impact": IMPACT_MAP.get("Fehlende Reject-Option (Cookie-Banner)", "–"),
+            },
+        })
+
+    return findings
+
+
 async def run_scan(url: str, conn, evidence_dir: str, browser=None) -> int:
     scan_id = insert_scan(conn, url)
 
@@ -53,6 +88,7 @@ async def run_scan(url: str, conn, evidence_dir: str, browser=None) -> int:
     har_hash = await asyncio.to_thread(_read_and_hash, crawl_result["har_path"])
 
     findings = await run_analysis(crawl_result["dom_after"], crawl_result["button_styles"])
+    findings.extend(_crawl_time_findings(crawl_result))
 
     citation_cache: dict[str, str | None] = {}
     async with httpx.AsyncClient(base_url=LEGAL_TEXT_MCP_BASE_URL, timeout=5.0) as client:
@@ -91,21 +127,7 @@ async def _analyze_page(
             page_data["dom_after"], page_data["button_styles"], llm_client=llm_client
         )
 
-        for contrast_finding in page_data.get("contrast_findings", []):
-            contrast_finding["target_norm"] = map_to_norm(contrast_finding["pattern_type"])
-            contrast_finding["evidence_data"]["impact"] = IMPACT_MAP.get(contrast_finding["pattern_type"], "–")
-            findings.append(contrast_finding)
-
-        if page_data.get("infinite_scroll_detected"):
-            findings.append({
-                "pattern_type": "Exploiting Addiction (Infinite Scroll)",
-                "target_norm": map_to_norm("Exploiting Addiction (Infinite Scroll)"),
-                "confidence_score": 0.6,
-                "evidence_data": {
-                    "note": "document height grew across 3 scroll iterations without an end indicator",
-                    "impact": IMPACT_MAP.get("Exploiting Addiction (Infinite Scroll)", "–"),
-                },
-            })
+        findings.extend(_crawl_time_findings(page_data))
 
         for finding in findings:
             finding["evidence_data"]["screenshot_path"] = screenshot_path

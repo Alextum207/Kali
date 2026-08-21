@@ -44,6 +44,7 @@ IMPACT_MAP = {
     "Exploiting Addiction (Infinite Scroll)": "Verbraucher wird unfreiwillig länger gebunden",
     "Verständnis-Barriere (Sprachkomplexität)": "Verbraucher versteht rechtlich relevante Klauseln nicht",
     "Visuelle Tarnung (Kontrast)": "Verbraucher übersieht rechtlich relevante Informationen",
+    "Fehlende Reject-Option (Cookie-Banner)": "Verbraucher kann Einwilligung nicht ablehnen",
 }
 
 

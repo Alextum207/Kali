@@ -315,6 +315,7 @@ async def _walk_category_flow(
                     "button_styles": snapshot["button_styles"],
                     "contrast_findings": snapshot["contrast_findings"],
                     "infinite_scroll_detected": False,
+                    "reject_option_missing": snapshot.get("reject_option_missing", False),
                 }
             )
 
@@ -390,8 +391,8 @@ async def crawl_site(
                 await page.close()
                 continue
 
-            await apply_consent_rules(page, consent_rules_dir)
-            snapshot = await _snapshot_page(page)
+            consent_result = await apply_consent_rules(page, consent_rules_dir)
+            snapshot = await _snapshot_page(page, consent_result=consent_result)
 
             if url == start_url and _looks_like_captcha(snapshot["dom_after"]):
                 await page.close()
@@ -410,6 +411,7 @@ async def crawl_site(
                 "button_styles": snapshot["button_styles"],
                 "contrast_findings": snapshot["contrast_findings"],
                 "infinite_scroll_detected": infinite_scroll,
+                "reject_option_missing": snapshot["reject_option_missing"],
             }
             pages.append(initial_page)
 

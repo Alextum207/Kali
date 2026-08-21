@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<title>Pattern-Highlighter Testseite (alle 8 Muster)</title>
+<style>
+  body { font-family: sans-serif; max-width: 700px; margin: 2em auto; line-height: 1.5; }
+  section { border: 1px solid #ccc; border-radius: 8px; padding: 1em 1.5em; margin-bottom: 1.5em; }
+  h2 { margin-top: 0; }
+  .plan { border: 1px solid #999; border-radius: 6px; padding: 1em; display: inline-block; vertical-align: top; margin-right: 1em; width: 180px; }
+</style>
+</head>
+<body>
+<h1>Pattern-Highlighter Testseite</h1>
+<p>Öffne die Extension nach dem Laden — jede Sektion sollte einen Fund erzeugen.
+   Countdown braucht ~2 Sekunden (Highlighting läuft nach 2 DOM-Snapshots im Abstand von ~1,5s).</p>
+
+<section>
+  <h2>1. Countdown (Fake Urgency)</h2>
+  <div id="countdown">00:00:15</div>
+  <script>
+    let secs = 15;
+    setInterval(() => {
+      secs = Math.max(0, secs - 1);
+      const m = String(Math.floor(secs / 60)).padStart(2, "0");
+      const s = String(secs % 60).padStart(2, "0");
+      document.getElementById("countdown").innerText = "00:" + m + ":" + s;
+    }, 1000);
+  </script>
+</section>
+
+<section>
+  <h2>2. Scarcity</h2>
+  <p>Nur noch 3 Stück verfügbar, jetzt bestellen.</p>
+</section>
+
+<section>
+  <h2>3. Social Proof</h2>
+  <p>5 andere Kunden kauften auch diesen Artikel.</p>
+</section>
+
+<section>
+  <h2>4. Forced Continuity</h2>
+  <p>10,99 Euro pro Monat ab dem 12. Monat.</p>
+</section>
+
+<section>
+  <h2>5. Pre-ticked Box</h2>
+  <form>
+    <input type="checkbox" id="newsletter" checked>
+    <label for="newsletter">Newsletter abonnieren (vorausgewählt)</label>
+  </form>
+</section>
+
+<section>
+  <h2>6. Autoplay</h2>
+  <video autoplay muted loop width="200" style="background:#333">
+    <!-- kein echtes Video nötig, nur das autoplay-Attribut wird geprüft -->
+  </video>
+</section>
+
+<section>
+  <h2>7. Trick Questions</h2>
+  <form>
+    <input type="checkbox" id="a">
+    <label for="a">Ich möchte Angebote erhalten</label><br>
+    <input type="checkbox" id="b" checked>
+    <label for="b">Ich möchte NICHT kontaktiert werden</label>
+  </form>
+</section>
+
+<section>
+  <h2>8. Decoy Pricing</h2>
+  <div class="plan" id="basic">
+    <p>Basic-Paket: 9,99€</p>
+    <ul><li>Feature A</li></ul>
+  </div>
+  <div class="plan" id="pro">
+    <p>Pro-Paket: 10,99€</p>
+    <ul>
+      <li>Feature A</li><li>Feature B</li><li>Feature C</li><li>Feature D</li>
+      <li>Feature E</li><li>Feature F</li><li>Feature G</li><li>Feature H</li>
+      <li>Feature I</li><li>Feature J</li><li>Feature K</li><li>Feature L</li>
+      <li>Feature M</li><li>Feature N</li><li>Feature O</li>
+    </ul>
+  </div>
+</section>
+
+</body>
+</html>

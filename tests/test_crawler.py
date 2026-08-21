@@ -3,6 +3,8 @@ import pathlib
 import pytest
 from playwright.async_api import async_playwright
 import time
+import json
+
 from app.crawler import (
     crawl_page,
     find_low_contrast_legal_text,
@@ -11,6 +13,7 @@ from app.crawler import (
     _looks_like_captcha,
     LEGAL_TEXT_KEYWORDS,
 )
+from app.analysis.pipeline import run_analysis
 
 
 def test_legal_text_keywords_is_shared_with_readability_module():
@@ -50,6 +53,70 @@ REDDIT_CONSENT_FIXTURE_URL = pathlib.Path(__file__).parent.joinpath(
 REDDIT_RULE_PATH = (
     pathlib.Path(__file__).parent.parent / "data" / "consent_rules" / "reddit.json"
 )
+ASYMMETRIC_CONSENT_FIXTURE_URL = pathlib.Path(__file__).parent.joinpath(
+    "fixtures/asymmetric_consent_page.html"
+).as_uri()
+NO_REJECT_CONSENT_FIXTURE_URL = pathlib.Path(__file__).parent.joinpath(
+    "fixtures/no_reject_consent_page.html"
+).as_uri()
+
+# Synthetic rule (not a real vendored Consent-O-Matic file — kept local to
+# this test) resolving both an accept and a reject click target scoped to
+# #cookie-banner, for asserting real-selector style capture end to end.
+ASYMMETRIC_RULE = {
+    "asymmetric-test-site": {
+        "detectors": [
+            {"presentMatcher": [{"type": "css", "target": {"selector": "#cookie-banner"}}]}
+        ],
+        "methods": [
+            {
+                "action": {
+                    "type": "click",
+                    "target": {"selector": "button", "textFilter": ["Alle akzeptieren"]},
+                    "parent": {"selector": "#cookie-banner"},
+                },
+                "name": "DO_CONSENT_ACCEPT",
+            },
+            {
+                "action": {
+                    "type": "click",
+                    "target": {"selector": "button", "textFilter": ["Ablehnen"]},
+                    "parent": {"selector": "#cookie-banner"},
+                },
+                "name": "DO_CONSENT_REJECT",
+            },
+        ],
+    }
+}
+
+# Synthetic rule whose banner is only ever confirmed present via
+# #cookie-banner and which has no reject-shaped click target and no
+# "type": "consent" toggle structure — the one case that should genuinely
+# be flagged as a missing reject option.
+NO_REJECT_RULE = {
+    "no-reject-test-site": {
+        "detectors": [
+            {"presentMatcher": [{"type": "css", "target": {"selector": "#cookie-banner"}}]}
+        ],
+        "methods": [
+            {
+                "action": {
+                    "type": "click",
+                    "target": {"selector": "button", "textFilter": ["Accept all"]},
+                    "parent": {"selector": "#cookie-banner"},
+                },
+                "name": "DO_CONSENT",
+            }
+        ],
+    }
+}
+
+
+def _write_rule(tmp_path, filename: str, rule: dict) -> str:
+    rules_dir = tmp_path / "rules"
+    rules_dir.mkdir(exist_ok=True)
+    (rules_dir / filename).write_text(json.dumps(rule), encoding="utf-8")
+    return str(rules_dir)
 
 
 @pytest.mark.asyncio
@@ -126,3 +193,89 @@ async def test_apply_consent_rules_scopes_reddit_rules_bare_button_selector(tmp_
 
     assert consent_clicked == "reject"
     assert unrelated_clicked is None
+
+
+@pytest.mark.asyncio
+async def test_apply_consent_rules_captures_real_reject_style_before_click(tmp_path):
+    """reject_style must reflect the real DOM element found via the rule's
+    own selector — captured before the click removes it from the page —
+    not the dead #accept/#reject ID probe in _snapshot_page."""
+    rules_dir = tmp_path / "rules"
+    rules_dir.mkdir()
+    (rules_dir / "reddit.json").write_text(REDDIT_RULE_PATH.read_text(encoding="utf-8"), encoding="utf-8")
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        page = await browser.new_page()
+        await page.goto(REDDIT_CONSENT_FIXTURE_URL)
+        result = await apply_consent_rules(page, str(rules_dir))
+        await browser.close()
+
+    assert result["reject_style"] is not None
+    assert result["accept_style"] is not None
+    assert result["reject_option_missing"] is False
+
+
+@pytest.mark.asyncio
+async def test_apply_consent_rules_feeds_real_selectors_into_button_asymmetry(tmp_path):
+    rules_dir = _write_rule(tmp_path, "asymmetric.json", ASYMMETRIC_RULE)
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        page = await browser.new_page()
+        await page.goto(ASYMMETRIC_CONSENT_FIXTURE_URL)
+        consent_result = await apply_consent_rules(page, rules_dir)
+        await browser.close()
+
+    button_styles = {"accept": consent_result["accept_style"], "reject": consent_result["reject_style"]}
+    assert button_styles["accept"]["width"] == 220
+    assert button_styles["reject"]["width"] == 50
+
+    findings = await run_analysis("<html><body></body></html>", button_styles)
+    assert any(f["pattern_type"] == "Visuelle Asymmetrie (Button)" for f in findings)
+
+
+@pytest.mark.asyncio
+async def test_apply_consent_rules_flags_missing_reject_option(tmp_path):
+    rules_dir = _write_rule(tmp_path, "no_reject.json", NO_REJECT_RULE)
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        page = await browser.new_page()
+        await page.goto(NO_REJECT_CONSENT_FIXTURE_URL)
+        result = await apply_consent_rules(page, rules_dir)
+        await browser.close()
+
+    assert result["reject_option_missing"] is True
+
+
+@pytest.mark.asyncio
+async def test_apply_consent_rules_does_not_flag_missing_reject_when_reject_exists(tmp_path):
+    rules_dir = tmp_path / "rules"
+    rules_dir.mkdir()
+    (rules_dir / "reddit.json").write_text(REDDIT_RULE_PATH.read_text(encoding="utf-8"), encoding="utf-8")
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        page = await browser.new_page()
+        await page.goto(REDDIT_CONSENT_FIXTURE_URL)
+        result = await apply_consent_rules(page, str(rules_dir))
+        await browser.close()
+
+    assert result["reject_option_missing"] is False
+
+
+@pytest.mark.asyncio
+async def test_apply_consent_rules_does_not_flag_missing_reject_when_banner_absent(tmp_path):
+    """The no-reject rule's presentMatcher (#cookie-banner) never matches a
+    page that doesn't have that banner at all — no claim should be made."""
+    rules_dir = _write_rule(tmp_path, "no_reject.json", NO_REJECT_RULE)
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        page = await browser.new_page()
+        await page.goto(FIXTURE_URL)
+        result = await apply_consent_rules(page, rules_dir)
+        await browser.close()
+
+    assert result["reject_option_missing"] is False

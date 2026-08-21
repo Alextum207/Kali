@@ -63,6 +63,45 @@ async def test_run_scan_persists_findings_with_evidence(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_run_scan_includes_contrast_and_reject_option_findings(tmp_path, monkeypatch):
+    """Regression test for the single-page scan path silently dropping
+    contrast_findings/reject_option_missing that the site-scan path already
+    handled via _analyze_page — both paths now go through the shared
+    _crawl_time_findings helper."""
+    async def fake_crawl_page(url, browser, har_dir=None):
+        result = _fake_crawl_result(har_dir)
+        result["contrast_findings"] = [
+            {
+                "pattern_type": "Visuelle Tarnung (Kontrast)",
+                "confidence_score": 0.6,
+                "evidence_data": {"selector": "p.legal"},
+            }
+        ]
+        result["reject_option_missing"] = True
+        return result
+
+    async def fake_run_analysis(dom_html, button_styles, llm_client=None):
+        return []
+
+    async def fake_fetch_citation(norm, base_url, client=None):
+        return None
+
+    monkeypatch.setattr("app.scan.crawl_page", fake_crawl_page)
+    monkeypatch.setattr("app.scan.run_analysis", fake_run_analysis)
+    monkeypatch.setattr("app.scan.fetch_citation", fake_fetch_citation)
+    monkeypatch.setattr("app.scan.rfc3161_timestamp", lambda data: None)
+
+    conn = init_db(":memory:")
+    scan_id = await run_scan("https://example.com", conn, str(tmp_path), browser=None)
+
+    findings = get_findings(conn, scan_id)
+    by_type = {f["pattern_type"]: f for f in findings}
+    assert by_type["Visuelle Tarnung (Kontrast)"]["evidence_data"]["impact"] != "–"
+    assert by_type["Fehlende Reject-Option (Cookie-Banner)"]["evidence_data"]["impact"] != "–"
+    assert by_type["Fehlende Reject-Option (Cookie-Banner)"]["target_norm"] == "Art. 4 Nr. 11, Art. 7 Abs. 4 DSGVO"
+
+
+@pytest.mark.asyncio
 async def test_run_scan_citation_none_does_not_crash(tmp_path, monkeypatch):
     async def fake_crawl_page(url, browser, har_dir=None):
         return _fake_crawl_result(har_dir)

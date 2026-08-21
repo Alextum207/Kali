@@ -23,6 +23,7 @@ NORM_MAP = {
     "Exploiting Addiction (Infinite Scroll)": "Art. 25 DSA",
     "Verständnis-Barriere (Sprachkomplexität)": "UWG §§ 5, 5a; Anhang zu § 3 Abs. 3",
     "Visuelle Tarnung (Kontrast)": "Art. 25 DSA",
+    "Fehlende Reject-Option (Cookie-Banner)": "Art. 4 Nr. 11, Art. 7 Abs. 4 DSGVO",
 }
 
 
