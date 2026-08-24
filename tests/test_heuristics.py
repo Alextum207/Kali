@@ -2,6 +2,7 @@ from app.analysis.heuristics import (
     find_preticked_checkboxes,
     find_countdown_elements,
     find_trick_questions,
+    find_default_consent_checkboxes,
     find_autoplay_media,
     find_decoy_pricing,
 )
@@ -88,6 +89,37 @@ def test_find_trick_questions_detects_extended_negation_keywords():
     findings = find_trick_questions(EXTENDED_NEGATION_HTML)
     assert len(findings) == 1
     assert findings[0]["evidence_data"]["selector_b"] == "#b"
+
+
+MAILCHIMP_STYLE_HTML = """
+<form>
+  <input type="checkbox" id="marketing">
+  <label for="marketing">I don't want to receive emails about product updates,
+    marketing best practices, and promotions. By not checking the box, I agree
+    to be opted in by default.</label>
+</form>
+"""
+
+PLAIN_OPT_OUT_HTML = """
+<form>
+  <input type="checkbox" id="newsletter">
+  <label for="newsletter">Ich möchte keine Werbung per E-Mail erhalten.</label>
+</form>
+"""
+
+
+def test_find_default_consent_checkboxes_flags_mailchimp_style_wording():
+    findings = find_default_consent_checkboxes(MAILCHIMP_STYLE_HTML)
+    assert len(findings) == 1
+    assert findings[0]["pattern_type"] == "Trick Questions"
+    assert findings[0]["evidence_data"]["selector"] == "#marketing"
+
+
+def test_find_default_consent_checkboxes_ignores_plain_opt_out():
+    """A normal opt-out checkbox that never states its own default
+    consequence must not be flagged — only the explicit "not checking =
+    default consent" wording is the tell (see module docstring)."""
+    assert find_default_consent_checkboxes(PLAIN_OPT_OUT_HTML) == []
 
 
 def test_find_autoplay_media_flags_autoplay_attribute():

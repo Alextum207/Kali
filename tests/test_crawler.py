@@ -11,6 +11,9 @@ from app.crawler import (
     apply_consent_rules,
     _snapshot_page,
     _looks_like_captcha,
+    _matches_present_detector,
+    _detect_cookie_wall,
+    verify_countdown_reset,
     LEGAL_TEXT_KEYWORDS,
 )
 from app.analysis.pipeline import run_analysis
@@ -236,6 +239,88 @@ async def test_apply_consent_rules_feeds_real_selectors_into_button_asymmetry(tm
 
 
 @pytest.mark.asyncio
+async def test_matches_present_detector_accepts_non_list_present_matcher():
+    """~19/205 vendored Consent-O-Matic rules (e.g. chandago, cookieLab,
+    EvidonIFrame) store `presentMatcher` as a single object instead of
+    wrapping it in a list. Root cause of the JS port's "object is not
+    iterable" console errors (consent.js's matchesPresentDetector) — the
+    Python side has the same unguarded assumption, just silently swallowed
+    by apply_consent_rules's blanket try/except, which drops these rules
+    from ever being detected as present instead of crashing loudly."""
+    rule = {
+        "chandago": {
+            "detectors": [
+                {"presentMatcher": {"type": "css", "target": {"selector": "#ac-Banner"}}}
+            ]
+        }
+    }
+
+    class _FakePage:
+        async def query_selector(self, selector):
+            return object() if selector == "#ac-Banner" else None
+
+    result = await _matches_present_detector(_FakePage(), rule)
+    assert result == ("chandago", "#ac-Banner")
+
+
+COOKIE_WALL_FIXTURE_URL = pathlib.Path(__file__).parent.joinpath(
+    "fixtures/cookie_wall_page.html"
+).as_uri()
+
+
+@pytest.mark.asyncio
+async def test_detect_cookie_wall_flags_overflow_hidden_body():
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        page = await browser.new_page()
+        await page.goto(COOKIE_WALL_FIXTURE_URL)
+        detected = await _detect_cookie_wall(page)
+        await browser.close()
+
+    assert detected is True
+
+
+@pytest.mark.asyncio
+async def test_detect_cookie_wall_false_for_normal_scrollable_page():
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        page = await browser.new_page()
+        await page.goto(NO_REJECT_CONSENT_FIXTURE_URL)
+        detected = await _detect_cookie_wall(page)
+        await browser.close()
+
+    assert detected is False
+
+
+@pytest.mark.asyncio
+async def test_apply_consent_rules_distinguishes_cookie_wall_from_missing_reject(tmp_path):
+    """The two signals must stay separate: a banner with no reject option
+    on an otherwise-normal page is `reject_option_missing` only; a banner
+    that also blocks the page underneath it (overflow:hidden) additionally
+    sets `cookie_wall_detected` — never conflated into one flag."""
+    rules_dir = _write_rule(tmp_path, "no_reject.json", NO_REJECT_RULE)
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+
+        normal_page = await browser.new_page()
+        await normal_page.goto(NO_REJECT_CONSENT_FIXTURE_URL)
+        normal_result = await apply_consent_rules(normal_page, rules_dir)
+
+        walled_page = await browser.new_page()
+        await walled_page.goto(COOKIE_WALL_FIXTURE_URL)
+        walled_result = await apply_consent_rules(walled_page, rules_dir)
+
+        await browser.close()
+
+    assert normal_result["reject_option_missing"] is True
+    assert normal_result["cookie_wall_detected"] is False
+
+    assert walled_result["reject_option_missing"] is True
+    assert walled_result["cookie_wall_detected"] is True
+
+
+@pytest.mark.asyncio
 async def test_apply_consent_rules_flags_missing_reject_option(tmp_path):
     rules_dir = _write_rule(tmp_path, "no_reject.json", NO_REJECT_RULE)
 
@@ -279,3 +364,58 @@ async def test_apply_consent_rules_does_not_flag_missing_reject_when_banner_abse
         await browser.close()
 
     assert result["reject_option_missing"] is False
+
+
+COUNTDOWN_RESET_FIXTURE_URL = pathlib.Path(__file__).parent.joinpath(
+    "fixtures/countdown_reset_page.html"
+).as_uri()
+
+
+@pytest.mark.asyncio
+async def test_verify_countdown_reset_boosts_confidence_when_timer_restarts():
+    """The fixture's countdown silently restarts a fresh 2-minute window
+    instead of expiring — jumping the page's clock forward must catch that
+    and both raise confidence and record the clock_verified evidence note."""
+    finding = {
+        "pattern_type": "Fake Urgency",
+        "confidence_score": 0.7,
+        "evidence_data": {"selector": "#countdown"},
+    }
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        page = await browser.new_page()
+        await page.goto(COUNTDOWN_RESET_FIXTURE_URL)
+        await verify_countdown_reset(page, [finding])
+        await browser.close()
+
+    assert finding["confidence_score"] > 0.7
+    assert "clock_verified" in finding["evidence_data"]
+
+
+COUNTDOWN_EXPIRES_FIXTURE_URL = pathlib.Path(__file__).parent.joinpath(
+    "fixtures/countdown_expires_page.html"
+).as_uri()
+
+
+@pytest.mark.asyncio
+async def test_verify_countdown_reset_leaves_confidence_unchanged_when_timer_expires():
+    """A countdown that correctly shows "Abgelaufen" instead of restarting
+    must not get boosted — only a note is added, confidence stays as-is
+    (per the explicit no-auto-downgrade decision: false-negative risk in
+    the comparison heuristic shouldn't turn into a false all-clear)."""
+    finding = {
+        "pattern_type": "Fake Urgency",
+        "confidence_score": 0.7,
+        "evidence_data": {"selector": "#countdown"},
+    }
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        page = await browser.new_page()
+        await page.goto(COUNTDOWN_EXPIRES_FIXTURE_URL)
+        await verify_countdown_reset(page, [finding])
+        await browser.close()
+
+    assert finding["confidence_score"] == 0.7
+    assert "clock_verified" in finding["evidence_data"]

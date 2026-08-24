@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="de">
+<head><meta charset="utf-8"><title>Deal endet bald</title></head>
+<body>
+  <div id="countdown">Angebot endet in: <span id="countdown-text">02:00</span></div>
+  <script>
+    // Dark pattern under test: instead of expiring, the countdown silently
+    // restarts a fresh 2-minute window every time it would hit zero.
+    let target = Date.now() + 2 * 60 * 1000;
+
+    function tick() {
+      let remaining = target - Date.now();
+      if (remaining <= 0) {
+        target = Date.now() + 2 * 60 * 1000;
+        remaining = target - Date.now();
+      }
+      const totalSeconds = Math.floor(remaining / 1000);
+      const minutes = Math.floor(totalSeconds / 60);
+      const seconds = totalSeconds % 60;
+      document.getElementById("countdown-text").textContent =
+        String(minutes).padStart(2, "0") + ":" + String(seconds).padStart(2, "0");
+    }
+
+    tick();
+    setInterval(tick, 1000);
+  </script>
+</body>
+</html>

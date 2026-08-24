@@ -1,0 +1,32 @@
+{
+    "$schema": "https://raw.githubusercontent.com/cavi-au/Consent-O-Matic/master/rules.schema.json",
+    "kali-demo-shop": {
+        "detectors": [
+            {
+                "presentMatcher": [
+                    {
+                        "type": "css",
+                        "target": {
+                            "selector": "#cookie-banner"
+                        }
+                    }
+                ]
+            }
+        ],
+        "methods": [
+            {
+                "action": {
+                    "type": "click",
+                    "target": {
+                        "selector": "button",
+                        "textFilter": ["Akzeptieren"]
+                    },
+                    "parent": {
+                        "selector": "#cookie-banner"
+                    }
+                },
+                "name": "DO_CONSENT_ACCEPT"
+            }
+        ]
+    }
+}

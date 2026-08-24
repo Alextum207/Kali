@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="de">
+
+<head>
+    <meta charset="utf-8">
+    <title>Dark-Pattern-Report</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        /* Kali brand palette, matching frontend/src/index.css's .kali-light
+           theme (cream/olive-gold) — kept as plain hex here, no build step. */
+        body {
+            font-family: "Montserrat", system-ui, sans-serif;
+            max-width: 900px;
+            margin: 2em auto;
+            padding: 0 1em;
+            color: #151514;
+            background: #ffffff;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 1.5em;
+        }
+
+        .brand img {
+            width: 32px;
+            height: 32px;
+            object-fit: contain;
+        }
+
+        .brand span {
+            font-family: "Cormorant Garamond", Georgia, serif;
+            font-weight: 700;
+            font-size: 1.5em;
+            letter-spacing: 0.15em;
+            color: #8D9518;
+        }
+
+        h1 {
+            font-family: "Cormorant Garamond", Georgia, serif;
+            font-weight: 700;
+            font-size: 1.8em;
+            margin: 0 0 0.2em;
+            border-bottom: 3px solid #8D9518;
+            padding-bottom: 0.3em;
+        }
+
+        .meta {
+            color: #6b6a63;
+            margin-bottom: 1.5em;
+            word-break: break-all;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th,
+        td {
+            border: 1px solid #D8D5CA;
+            padding: 0.5em;
+            text-align: left;
+            vertical-align: top;
+            font-size: 0.9em;
+            word-break: break-all;
+        }
+
+        th {
+            background: #8D9518;
+            color: #ffffff;
+            font-weight: 600;
+        }
+
+        tr:nth-child(even) td {
+            background: #F4EEE1;
+        }
+
+        .actions {
+            margin-bottom: 1em;
+        }
+
+        .actions button {
+            font-family: "Montserrat", system-ui, sans-serif;
+            font-size: 1em;
+            font-weight: 600;
+            padding: 0.6em 1.2em;
+            cursor: pointer;
+            background: #8D9518;
+            color: #ffffff;
+            border: none;
+            border-radius: 999px;
+        }
+
+        .actions button:hover {
+            background: #757c14;
+        }
+
+        .empty {
+            color: #6b6a63;
+        }
+
+        @media print {
+            .actions {
+                display: none;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="actions"><button id="print-btn">Als PDF speichern</button></div>
+    <div class="brand">
+        <img src="../images/kali-logo.png" alt="Kali">
+        <span>KALI</span>
+    </div>
+    <h1>Dark-Pattern-Report</h1>
+    <p class="meta" id="meta"></p>
+    <div id="content"></div>
+    <script src="report.js"></script>
+</body>
+
+</html>

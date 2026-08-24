@@ -2,8 +2,8 @@ import logging
 
 from app.analysis.heuristics import (
     find_preticked_checkboxes,
-    find_countdown_elements,
     find_trick_questions,
+    find_default_consent_checkboxes,
     find_autoplay_media,
     find_decoy_pricing,
 )
@@ -24,7 +24,7 @@ _COOCCURRENCE_BOOST = 0.05
 # Kurzbeschreibung der Verbraucher-Auswirkung je Pattern-Typ, für die
 # "Auswirkung"-Spalte in Findings-Tabelle/PDF-Report. Fallback "–" in den
 # Templates greift für Findings, die außerhalb dieser Pipeline entstehen
-# (z.B. Kontrast-/Infinite-Scroll-Funde in app/scan.py).
+# (z.B. Kontrast-/Infinite-Scroll-/Countdown-Funde in app/scan.py).
 IMPACT_MAP = {
     "Fake Urgency": "Verbraucher wird zu überstürzter Kaufentscheidung gedrängt",
     "Fake Scarcity": "Verbraucher wird zu überstürzter Kaufentscheidung gedrängt",
@@ -45,6 +45,7 @@ IMPACT_MAP = {
     "Verständnis-Barriere (Sprachkomplexität)": "Verbraucher versteht rechtlich relevante Klauseln nicht",
     "Visuelle Tarnung (Kontrast)": "Verbraucher übersieht rechtlich relevante Informationen",
     "Fehlende Reject-Option (Cookie-Banner)": "Verbraucher kann Einwilligung nicht ablehnen",
+    "Cookie Wall": "Verbraucher kann Inhalt nicht ohne Einwilligung nutzen",
 }
 
 
@@ -54,8 +55,8 @@ async def run_analysis(
     findings: list[dict] = []
 
     findings.extend(find_preticked_checkboxes(dom_html))
-    findings.extend(find_countdown_elements(dom_html))
     findings.extend(find_trick_questions(dom_html))
+    findings.extend(find_default_consent_checkboxes(dom_html))
     findings.extend(find_autoplay_media(dom_html))
     findings.extend(find_decoy_pricing(dom_html))
 

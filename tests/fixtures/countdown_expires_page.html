@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="de">
+<head><meta charset="utf-8"><title>Deal endet bald</title></head>
+<body>
+  <div id="countdown">Angebot endet in: <span id="countdown-text">02:00</span></div>
+  <script>
+    // Legitimate countdown: stops and shows "Abgelaufen" once it hits zero,
+    // no silent restart.
+    const target = Date.now() + 2 * 60 * 1000;
+    let intervalId;
+
+    function tick() {
+      const remaining = target - Date.now();
+      if (remaining <= 0) {
+        document.getElementById("countdown-text").textContent = "Abgelaufen";
+        clearInterval(intervalId);
+        return;
+      }
+      const totalSeconds = Math.floor(remaining / 1000);
+      const minutes = Math.floor(totalSeconds / 60);
+      const seconds = totalSeconds % 60;
+      document.getElementById("countdown-text").textContent =
+        String(minutes).padStart(2, "0") + ":" + String(seconds).padStart(2, "0");
+    }
+
+    tick();
+    intervalId = setInterval(tick, 1000);
+  </script>
+</body>
+</html>

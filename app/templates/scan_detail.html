@@ -1,14 +1,41 @@
 {% extends "base.html" %}
 {% block title %}Scan {{ scan.id }} – Kali{% endblock %}
+{% block head %}
+{% if scan.status == "running" %}
+<meta http-equiv="refresh" content="5">
+{% endif %}
+{% endblock %}
 {% block content %}
 <h1>Scan: {{ scan.url }}</h1>
+{% if scan.status == "running" %}
+<p class="badge badge-mittel">Scan läuft… (aktualisiert automatisch alle 5s)</p>
+{% elif scan.status == "error" %}
+<p class="badge badge-hoch">Scan fehlgeschlagen — evtl. Captcha oder Netzwerkfehler, siehe Server-Log.
+  <a href="/">Neuen Scan starten</a></p>
+{% endif %}
 <a href="/scans/{{ scan.id }}/report.pdf">PDF-Report herunterladen</a>
+<a href="mailto:{{ vz_email }}?subject={{ mailto_subject }}&body={{ mailto_body }}">Bei Verbraucherzentrale melden</a>
+
+{% if other_scans %}
+<form method="get" action="/scans/compare">
+  <input type="hidden" name="scan_b" value="{{ scan.id }}">
+  <label>Vergleichen mit
+    <select name="scan_a">
+      {% for other in other_scans %}
+      <option value="{{ other.id }}">Scan #{{ other.id }} ({{ other.started_at }})</option>
+      {% endfor %}
+    </select>
+  </label>
+  <button type="submit">Vergleichen</button>
+</form>
+{% endif %}
 
 <div class="card">
   <span class="badge badge-{{ risk.level }}">{{ risk.level }} ({{ "%.2f"|format(risk.score) }})</span>
   {% for category, count in risk.by_category.items() %}
   <span>{{ category }}: {{ count }}</span>
   {% endfor %}
+  <p class="hint">Automatisierte Ersteinschätzung — kein Rechtsrat, Einzelfallprüfung erforderlich.</p>
 </div>
 
 <h2>Gecrawlte Seiten</h2>
@@ -43,18 +70,42 @@
   <button type="submit">Filtern</button>
 </form>
 
+{% if not findings %}
+{% if scan.status == "running" %}
+<p>Noch keine Funde — Scan läuft noch.</p>
+{% else %}
+<p>Keine Dark Patterns auf dieser Seite erkannt.</p>
+{% endif %}
+{% else %}
 <table>
-  <tr><th>Pattern-Typ</th><th>Norm</th><th>Confidence</th><th>Auswirkung</th><th>Link</th><th>Zeit</th><th>Screenshot</th></tr>
+  <tr><th>Pattern-Typ</th><th>Norm</th><th>Confidence</th><th>Auswirkung</th><th>Link</th><th>Zeit</th><th>Screenshot</th><th>Human Review</th></tr>
   {% for f in findings %}
   <tr>
     <td>{{ f.pattern_type }}</td>
     <td>{{ f.target_norm }}</td>
-    <td>{{ f.confidence_score }}</td>
-    <td>{{ f.evidence_data.get("impact") or "–" }}</td>
+    <td>{{ "%.2f"|format(f.confidence_score) }}</td>
+    <td>
+      {{ f.evidence_data.get("impact") or "–" }}
+      {% if f.evidence_data.get("clock_verified") %}
+      <br><span class="hint">{{ f.evidence_data.get("clock_verified") }}</span>
+      {% endif %}
+    </td>
     <td>{% if f.page_url %}<a href="{{ f.page_url }}" target="_blank">{{ f.page_url }}</a>{% else %}–{% endif %}</td>
     <td>{{ f.created_at }}</td>
     <td>{% if f.screenshot_url %}<a href="{{ f.screenshot_url }}" target="_blank">ansehen</a>{% else %}–{% endif %}</td>
+    <td>
+      {{ f.human_review or "ungeprüft" }}
+      <form method="post" action="/scans/{{ scan.id }}/findings/{{ f.id }}/review" style="display:inline">
+        <input type="hidden" name="value" value="confirmed">
+        <button type="submit">Bestätigen</button>
+      </form>
+      <form method="post" action="/scans/{{ scan.id }}/findings/{{ f.id }}/review" style="display:inline">
+        <input type="hidden" name="value" value="dismissed">
+        <button type="submit">Verwerfen</button>
+      </form>
+    </td>
   </tr>
   {% endfor %}
 </table>
+{% endif %}
 {% endblock %}

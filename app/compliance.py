@@ -24,6 +24,7 @@ NORM_MAP = {
     "Verständnis-Barriere (Sprachkomplexität)": "UWG §§ 5, 5a; Anhang zu § 3 Abs. 3",
     "Visuelle Tarnung (Kontrast)": "Art. 25 DSA",
     "Fehlende Reject-Option (Cookie-Banner)": "Art. 4 Nr. 11, Art. 7 Abs. 4 DSGVO",
+    "Cookie Wall": "Art. 4 Nr. 11, Art. 7 Abs. 4 DSGVO",
 }
 
 
@@ -106,6 +107,32 @@ STATUTE_TEXTS: dict[str, str] = {
         "Einwilligung abhängig gemacht wird, die für die Vertragserfüllung "
         "nicht erforderlich ist (Kopplungsverbot)."
     ),
+}
+
+
+# Kurzhinweise, wie ein Fund gerichtsfest nachbelegt werden kann — ein Satz
+# pro Pattern-Typ, aus `noch ergämnzen/.../Legal framework sheet ...md`
+# verdichtet. Deckt alle NORM_MAP-Typen ab.
+EVIDENCE_HINTS: dict[str, str] = {
+    "Fake Urgency": "Screenshot vor/nach Reload + Zeitstempel prüfen, ob Countdown neu startet.",
+    "Fake Scarcity": "Seite zu mehreren Zeitpunkten besuchen und Bestandshinweis vergleichen.",
+    "Fake Social Proof": "Seite mehrfach/in neuer Session laden und angezeigte Nutzerzahlen vergleichen.",
+    "Sneaking / Hidden Costs": "Checkout Schritt für Schritt durchlaufen, Gesamtpreis je Schritt dokumentieren, prüfen wann Zusatzkosten erstmals erscheinen.",
+    "Confirm Shaming": "Exakten Wortlaut der Ablehnungsoption per Screenshot sichern.",
+    "Visuelle Asymmetrie (Button)": "Screenshot beider Buttons nebeneinander, Kontrast/Größe/Position vergleichen.",
+    "Pre-ticked Box": "Screenshot vor jeder Nutzerinteraktion — zeigt Standardzustand der Checkbox.",
+    "Trick Questions": "Dialogtext per Screenshot sichern, Formulierung und Ergebnis jeder Auswahlmöglichkeit dokumentieren.",
+    "Forced Continuity": "Abschluss- und Kündigungsprozess vollständig durchlaufen, verfügbare Kündigungskanäle dokumentieren.",
+    "Decoy Pricing": "Screenshot der Preistabelle mit allen Optionen, Preis-/Leistungsverhältnis dokumentieren.",
+    "Nagging": "Häufigkeit und Zeitpunkte wiederholter Aufforderungen über eine Sitzung protokollieren.",
+    "Roach Motel": "Kündigungspfad vollständig durchklicken und Schrittzahl/-kanäle dokumentieren.",
+    "Forced Path": "Klickpfad Schritt für Schritt dokumentieren, prüfen ob ein direkter Weg zum Ziel fehlt.",
+    "Exploiting Addiction (Autoplay)": "Screen-Recording, das automatisches Abspielen ohne Nutzerinteraktion zeigt.",
+    "Exploiting Addiction (Infinite Scroll)": "Screen-Recording des endlosen Nachladens ohne erkennbares Seitenende dokumentieren.",
+    "Verständnis-Barriere (Sprachkomplexität)": "Textstelle per Screenshot sichern, Lesbarkeit/Fachjargon im Kontext dokumentieren.",
+    "Visuelle Tarnung (Kontrast)": "Berechneten Kontrastwert und Screenshot des betroffenen Elements dokumentieren.",
+    "Fehlende Reject-Option (Cookie-Banner)": "Screenshot des Banners vor Interaktion — zeigt, ob eine gleichwertige Ablehnen-Option fehlt.",
+    "Cookie Wall": "Ablehnen versuchen und dokumentieren, ob Zugang zur Seite ohne Einwilligung verweigert wird.",
 }
 
 

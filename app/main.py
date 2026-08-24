@@ -1,5 +1,7 @@
+import logging
 import os
 import sqlite3
+import urllib.parse
 from contextlib import asynccontextmanager
 
 # Must run before any `app.*` import below — several modules (app.scan,
@@ -11,17 +13,22 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import anthropic
-from fastapi import Depends, FastAPI, Form, HTTPException, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, Form, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse, HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from playwright.async_api import async_playwright
 
-from app.compliance import aggregate_risk_score
-from app.crawler import CaptchaRequiredError
-from app.db import init_db, get_scan, get_findings, get_pages, get_page_findings, list_scans
+from app.compliance import EVIDENCE_HINTS, aggregate_risk_score
+from app.db import (
+    init_db, get_scan, get_findings, get_pages, get_page_findings, list_scans,
+    insert_scan, mark_scan_status, set_human_review, list_scans_by_url,
+)
 from app.scan import run_site_scan
 from app.url_safety import validate_scan_url
+
+logger = logging.getLogger(__name__)
 
 DB_PATH = os.environ.get("DB_PATH", "./data/monitor.db")
 EVIDENCE_DIR = os.environ.get("EVIDENCE_DIR", "./data/evidence")
@@ -52,6 +59,14 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Dark-Pattern-Monitor", lifespan=lifespan)
+
+# Read-only JSON API for the separate frontend/ (Vite dev server, default
+# port 8080) — the Jinja2 UI above doesn't need this, it's same-origin.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[os.environ.get("FRONTEND_ORIGIN", "http://localhost:8080")],
+    allow_methods=["GET"],
+)
 
 templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "templates"))
 
@@ -101,6 +116,35 @@ def dashboard(request: Request, conn: sqlite3.Connection = Depends(_get_conn)):
     return templates.TemplateResponse(request, "dashboard.html", {"scans": scans})
 
 
+@app.get("/api/scans")
+def api_list_scans(conn: sqlite3.Connection = Depends(_get_conn)):
+    scans = list_scans(conn)
+    for scan in scans:
+        scan["risk"] = aggregate_risk_score(get_findings(conn, scan["id"]))
+    return scans
+
+
+@app.get("/api/scans/{scan_id}")
+def api_scan_detail(scan_id: int, conn: sqlite3.Connection = Depends(_get_conn)):
+    scan = get_scan(conn, scan_id)
+    if scan is None:
+        raise HTTPException(status_code=404, detail="Scan not found")
+    pages = get_pages(conn, scan_id)
+    findings = _attach_display_fields(get_findings(conn, scan_id), pages, scan["url"])
+    scan["risk"] = aggregate_risk_score(findings)
+    return {"scan": scan, "pages": pages, "findings": findings}
+
+
+@app.get("/api/scans/{scan_id}/pages/{page_id}")
+def api_page_findings(scan_id: int, page_id: int, conn: sqlite3.Connection = Depends(_get_conn)):
+    scan = get_scan(conn, scan_id)
+    if scan is None:
+        raise HTTPException(status_code=404, detail="Scan not found")
+    pages = get_pages(conn, scan_id)
+    findings = _attach_display_fields(get_page_findings(conn, page_id), pages, scan["url"])
+    return {"scan": scan, "findings": findings}
+
+
 @app.get("/evidence/{filename}")
 def evidence_file(filename: str):
     # os.path.basename strips any directory component the client tries to
@@ -112,9 +156,35 @@ def evidence_file(filename: str):
     return FileResponse(path)
 
 
+async def _run_scan_background(scan_id: int, url: str, max_pages: int | None, browser) -> None:
+    """Runs the actual crawl+analysis after the redirect has already been
+    sent — uses its own DB connection since the request-scoped one
+    (Depends(_get_conn)) is closed once the response is out. Any failure
+    (including CaptchaRequiredError, which used to surface as an HTTP 409
+    before scanning went async) is recorded as scans.status='done'/'error'
+    instead, since there's no request left to answer synchronously."""
+    bg_conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    bg_conn.row_factory = sqlite3.Row
+    try:
+        await run_site_scan(
+            url,
+            bg_conn,
+            EVIDENCE_DIR,
+            browser=browser,
+            max_pages=max_pages,
+            llm_client=_LLM_CLIENT,
+            scan_id=scan_id,
+        )
+    except Exception:
+        mark_scan_status(bg_conn, scan_id, "error")
+    finally:
+        bg_conn.close()
+
+
 @app.post("/scans")
 async def start_scan(
     request: Request,
+    background_tasks: BackgroundTasks,
     url: str = Form(...),
     max_pages: int | None = Form(None),
     conn: sqlite3.Connection = Depends(_get_conn),
@@ -124,21 +194,39 @@ async def start_scan(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    try:
-        scan_id = await run_site_scan(
-            url,
-            conn,
-            EVIDENCE_DIR,
-            browser=request.app.state.browser,
-            max_pages=max_pages,
-            llm_client=_LLM_CLIENT,
-        )
-    except CaptchaRequiredError as exc:
-        raise HTTPException(
-            status_code=409,
-            detail=f"Captcha erkannt auf {exc.url} — bitte manuell lösen und Scan erneut starten.",
-        ) from exc
+    scan_id = insert_scan(conn, url)
+    background_tasks.add_task(
+        _run_scan_background, scan_id, url, max_pages, request.app.state.browser
+    )
     return RedirectResponse(url=f"/scans/{scan_id}", status_code=303)
+
+
+@app.get("/scans/compare", response_class=HTMLResponse)
+def compare_scans(request: Request, scan_a: int, scan_b: int, conn: sqlite3.Connection = Depends(_get_conn)):
+    a = get_scan(conn, scan_a)
+    b = get_scan(conn, scan_b)
+    if a is None or b is None:
+        raise HTTPException(status_code=404, detail="Scan not found")
+
+    pages_a = get_pages(conn, scan_a)
+    pages_b = get_pages(conn, scan_b)
+    findings_a = _attach_display_fields(get_findings(conn, scan_a), pages_a, a["url"])
+    findings_b = _attach_display_fields(get_findings(conn, scan_b), pages_b, b["url"])
+
+    def _key(f):
+        return (f["pattern_type"], f["target_norm"], f["page_url"])
+
+    keys_a = {_key(f) for f in findings_a}
+    keys_b = {_key(f) for f in findings_b}
+
+    new_in_b = sorted(keys_b - keys_a)
+    resolved = sorted(keys_a - keys_b)
+    unchanged = sorted(keys_a & keys_b)
+
+    return templates.TemplateResponse(
+        request, "compare.html",
+        {"scan_a": a, "scan_b": b, "new_in_b": new_in_b, "resolved": resolved, "unchanged": unchanged},
+    )
 
 
 @app.get("/scans/{scan_id}", response_class=HTMLResponse)
@@ -174,6 +262,16 @@ def scan_detail(
     if min_conf is not None:
         filtered = [f for f in filtered if f["confidence_score"] >= min_conf]
 
+    other_scans = [s for s in list_scans_by_url(conn, scan["url"]) if s["id"] != scan_id]
+
+    vz_email = os.environ.get("VZ_EMAIL", "beschwerde@verbraucherzentrale.example")
+    mailto_subject = urllib.parse.quote(f"Dark-Pattern-Meldung: {scan['url']}")
+    mailto_body = urllib.parse.quote(
+        f"Automatisiert erkannte Dark Patterns auf {scan['url']} (Kali-Scan #{scan_id}).\n\n"
+        "Bitte den heruntergeladenen PDF-Report manuell an diese E-Mail anhängen "
+        "(mailto-Links können keine Dateien anhängen)."
+    )
+
     return templates.TemplateResponse(
         request, "scan_detail.html",
         {
@@ -186,8 +284,20 @@ def scan_detail(
             "selected_pattern_type": pattern_type or "",
             "selected_target_norm": target_norm or "",
             "selected_min_confidence": min_conf,
+            "vz_email": vz_email,
+            "mailto_subject": mailto_subject,
+            "mailto_body": mailto_body,
+            "other_scans": other_scans,
         },
     )
+
+
+@app.post("/scans/{scan_id}/findings/{finding_id}/review")
+def set_finding_review(
+    scan_id: int, finding_id: int, value: str = Form(...), conn: sqlite3.Connection = Depends(_get_conn)
+):
+    set_human_review(conn, finding_id, value)
+    return RedirectResponse(url=f"/scans/{scan_id}", status_code=303)
 
 
 @app.get("/scans/{scan_id}/pages/{page_id}", response_class=HTMLResponse)
@@ -216,5 +326,25 @@ def scan_report(scan_id: int, conn: sqlite3.Connection = Depends(_get_conn)):
     pages = get_pages(conn, scan_id)
     findings = _attach_display_fields(get_findings(conn, scan_id), pages, scan["url"])
     out_path = os.path.join(EVIDENCE_DIR, f"scan_{scan_id}_report.pdf")
-    generate_pdf_report(scan["url"], findings, out_path)
+    try:
+        generate_pdf_report(scan["url"], findings, out_path)
+    except Exception as exc:  # noqa: BLE001 - deliberate broad catch, see below
+        # Best-effort fallback: WeasyPrint needs native GTK libraries that
+        # aren't installed on every machine (e.g. Windows without GTK) —
+        # rather than a raw 500 on "PDF-Report herunterladen", serve the
+        # same report content as plain HTML (same template, no PDF engine
+        # involved) so the evidence is still reachable.
+        from collections import Counter
+        logger.warning("scan_report: PDF generation failed, falling back to HTML: %s", exc)
+        risk = aggregate_risk_score(findings)
+        by_norm = dict(Counter(f["target_norm"] for f in findings))
+        html = templates.get_template("report.html").render(
+            url=scan["url"], findings=findings, risk=risk, by_norm=by_norm,
+            evidence_hints=EVIDENCE_HINTS,
+        )
+        return HTMLResponse(
+            "<p style=\"background:#fdecea;color:#611a15;padding:0.75em 1em;"
+            "font-family:sans-serif;\">PDF-Engine nicht verfügbar auf diesem "
+            "Rechner — hier die HTML-Ansicht des Reports.</p>" + html
+        )
     return FileResponse(out_path, media_type="application/pdf")

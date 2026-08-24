@@ -1,6 +1,6 @@
 {
   "extName": {
-    "message": "Pattern Highlighter",
+    "message": "Kali",
     "description": "The name of the extension."
   },
   "extDescription": {
@@ -27,6 +27,10 @@
     "message": "Repeat pattern highlighting",
     "description": "Text for the button to repeat the pattern highlighting on the page."
   },
+  "buttonCreateReport": {
+    "message": "Create PDF report",
+    "description": "Text for the button that opens the report page with the current findings to print/save as PDF."
+  },
   "headingShowPattern": {
     "message": "Show patterns",
     "description": "Heading in the popup for the buttons to show individual pattern elements."
@@ -41,7 +45,7 @@
   },
   "textMoreInformation": {
     "message": "More information about Dark Patterns",
-    "description": "Text in the footer preceding the link to the dapde.de website."
+    "description": "Text in the footer preceding the link to the Verbraucherzentrale website."
   },
   "infoExtensionStarted": {
     "message": "Pattern Highlighter started.",
@@ -66,8 +70,8 @@
     "description": "Name of the countdown pattern."
   },
   "patternCountdown_infoUrl": {
-    "message": "https://dapde.de/en/dark-patterns-en/types-and-examples-en/druck2-en/",
-    "description": "URL to the explanation of the countdown pattern on the dapde.de website."
+    "message": "https://www.verbraucherzentrale.de/wissen/digitale-welt/onlinedienste/dark-patterns-so-wollen-websites-und-apps-sie-manipulieren-58082",
+    "description": "URL to the explanation of the countdown pattern on the Verbraucherzentrale website."
   },
   "patternCountdown_info": {
     "message": "Countdown patterns induce (truthfully or falsely) the impression that a product or service is only available for a certain period of time. This is illustrated through a running clock or a lapsing bar. You can watch as the desired good slips away.",
@@ -78,8 +82,8 @@
     "description": "Name of the scarcity pattern."
   },
   "patternScarcity_infoUrl": {
-    "message": "https://dapde.de/en/dark-patterns-en/types-and-examples-en/druck2-en/",
-    "description": "URL to the explanation of the scarcity pattern on the dapde.de website."
+    "message": "https://www.verbraucherzentrale.de/wissen/digitale-welt/onlinedienste/dark-patterns-so-wollen-websites-und-apps-sie-manipulieren-58082",
+    "description": "URL to the explanation of the scarcity pattern on the Verbraucherzentrale website."
   },
   "patternScarcity_info": {
     "message": "The Scarcity Pattern induces (truthfully or falsely) the impression that goods or services are only available in limited numbers. Scarcity Patterns are also used in versions where the alleged scarcity is simply invented or where it is not made clear whether the limited availability relates to the product as a whole or only to the contingent of the portal visited.",
@@ -90,8 +94,8 @@
     "description": "Name of the social proof pattern."
   },
   "patternSocialProof_infoUrl": {
-    "message": "https://dapde.de/en/dark-patterns-en/types-and-examples-en/druck2-en/",
-    "description": "URL to the explanation of the social proof pattern on the dapde.de website."
+    "message": "https://www.verbraucherzentrale.de/wissen/digitale-welt/onlinedienste/dark-patterns-so-wollen-websites-und-apps-sie-manipulieren-58082",
+    "description": "URL to the explanation of the social proof pattern on the Verbraucherzentrale website."
   },
   "patternSocialProof_info": {
     "message": "Social Proof is another Dark Pattern of this category. Positive product reviews or activity reports from other users are displayed directly. Often, these reviews or reports are simply made up. But authentic reviews or reports also influence the purchase decision through smart selection and placement.",
@@ -102,8 +106,8 @@
     "description": "Name of the forced continuity pattern."
   },
   "patternForcedContinuity_infoUrl": {
-    "message": "https://dapde.de/en/dark-patterns-en/types-and-examples-en/operativer-zwang2-en/",
-    "description": "URL to the explanation of the forced continuity pattern on the dapde.de website."
+    "message": "https://www.verbraucherzentrale.de/wissen/digitale-welt/onlinedienste/dark-patterns-so-wollen-websites-und-apps-sie-manipulieren-58082",
+    "description": "URL to the explanation of the forced continuity pattern on the Verbraucherzentrale website."
   },
   "patternForcedContinuity_info": {
     "message": "The Forced Continuity pattern automatically renews free or low-cost trial subscriptions - but for a fee or at a higher price. The design trick is that the order form visually suggests that there is no charge and conceals the (automatic) follow-up costs.",
@@ -114,8 +118,8 @@
     "description": "Name of the pre-ticked box pattern."
   },
   "patternPreTickedBox_infoUrl": {
-    "message": "https://dapde.de/en/dark-patterns-en/types-and-examples-en/",
-    "description": "URL to the explanation of the pre-ticked box pattern on the dapde.de website."
+    "message": "https://www.verbraucherzentrale.de/wissen/digitale-welt/onlinedienste/dark-patterns-so-wollen-websites-und-apps-sie-manipulieren-58082",
+    "description": "URL to the explanation of the pre-ticked box pattern on the Verbraucherzentrale website."
   },
   "patternPreTickedBox_info": {
     "message": "A checkbox that is checked by default tricks users into consenting to something (e.g. a newsletter) without an active choice.",
@@ -126,8 +130,8 @@
     "description": "Name of the autoplay pattern."
   },
   "patternAutoplay_infoUrl": {
-    "message": "https://dapde.de/en/dark-patterns-en/types-and-examples-en/",
-    "description": "URL to the explanation of the autoplay pattern on the dapde.de website."
+    "message": "https://www.verbraucherzentrale.de/wissen/digitale-welt/onlinedienste/dark-patterns-so-wollen-websites-und-apps-sie-manipulieren-58082",
+    "description": "URL to the explanation of the autoplay pattern on the Verbraucherzentrale website."
   },
   "patternAutoplay_info": {
     "message": "Video or audio elements that start playing automatically bind the user's attention without an active choice.",
@@ -138,8 +142,8 @@
     "description": "Name of the trick questions pattern."
   },
   "patternTrickQuestions_infoUrl": {
-    "message": "https://dapde.de/en/dark-patterns-en/types-and-examples-en/",
-    "description": "URL to the explanation of the trick questions pattern on the dapde.de website."
+    "message": "https://www.verbraucherzentrale.de/wissen/digitale-welt/onlinedienste/dark-patterns-so-wollen-websites-und-apps-sie-manipulieren-58082",
+    "description": "URL to the explanation of the trick questions pattern on the Verbraucherzentrale website."
   },
   "patternTrickQuestions_info": {
     "message": "Adjacent checkboxes whose labels switch negation polarity, so a consistent-looking checkbox list actually means the opposite of what a quick scan suggests.",
@@ -150,8 +154,8 @@
     "description": "Name of the decoy pricing pattern."
   },
   "patternDecoyPricing_infoUrl": {
-    "message": "https://dapde.de/en/dark-patterns-en/types-and-examples-en/",
-    "description": "URL to the explanation of the decoy pricing pattern on the dapde.de website."
+    "message": "https://www.verbraucherzentrale.de/wissen/digitale-welt/onlinedienste/dark-patterns-so-wollen-websites-und-apps-sie-manipulieren-58082",
+    "description": "URL to the explanation of the decoy pricing pattern on the Verbraucherzentrale website."
   },
   "patternDecoyPricing_info": {
     "message": "A pricing tier costs only slightly more than a neighboring one but offers disproportionately more value, nudging users toward the pricier option.",
@@ -162,8 +166,8 @@
     "description": "Name of the cookie-banner-asymmetry pattern."
   },
   "patternCookieBannerAsymmetry_infoUrl": {
-    "message": "https://dapde.de/en/dark-patterns-en/types-and-examples-en/",
-    "description": "URL to the explanation of the cookie-banner-asymmetry pattern on the dapde.de website."
+    "message": "https://www.verbraucherzentrale.de/wissen/digitale-welt/onlinedienste/dark-patterns-so-wollen-websites-und-apps-sie-manipulieren-58082",
+    "description": "URL to the explanation of the cookie-banner-asymmetry pattern on the Verbraucherzentrale website."
   },
   "patternCookieBannerAsymmetry_info": {
     "message": "The cookie banner's \"accept all\" button is noticeably larger or higher-contrast than its \"reject\" button, nudging users toward consenting.",
@@ -174,8 +178,8 @@
     "description": "Name of the missing-reject-option pattern."
   },
   "patternCookieBannerMissingReject_infoUrl": {
-    "message": "https://dapde.de/en/dark-patterns-en/types-and-examples-en/",
-    "description": "URL to the explanation of the missing-reject-option pattern on the dapde.de website."
+    "message": "https://www.verbraucherzentrale.de/wissen/digitale-welt/onlinedienste/dark-patterns-so-wollen-websites-und-apps-sie-manipulieren-58082",
+    "description": "URL to the explanation of the missing-reject-option pattern on the Verbraucherzentrale website."
   },
   "patternCookieBannerMissingReject_info": {
     "message": "The cookie banner offers no equivalent one-click way to reject all non-essential cookies.",

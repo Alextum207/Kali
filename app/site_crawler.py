@@ -314,8 +314,10 @@ async def _walk_category_flow(
                     "screenshot": snapshot["screenshot"],
                     "button_styles": snapshot["button_styles"],
                     "contrast_findings": snapshot["contrast_findings"],
+                    "countdown_findings": snapshot["countdown_findings"],
                     "infinite_scroll_detected": False,
                     "reject_option_missing": snapshot.get("reject_option_missing", False),
+                    "cookie_wall_detected": snapshot.get("cookie_wall_detected", False),
                 }
             )
 
@@ -410,8 +412,10 @@ async def crawl_site(
                 "screenshot": snapshot["screenshot"],
                 "button_styles": snapshot["button_styles"],
                 "contrast_findings": snapshot["contrast_findings"],
+                "countdown_findings": snapshot["countdown_findings"],
                 "infinite_scroll_detected": infinite_scroll,
                 "reject_option_missing": snapshot["reject_option_missing"],
+                "cookie_wall_detected": snapshot["cookie_wall_detected"],
             }
             pages.append(initial_page)
 
@@ -431,6 +435,7 @@ async def crawl_site(
             initial_page["screenshot"] = updated_snapshot["screenshot"]
             initial_page["button_styles"] = updated_snapshot["button_styles"]
             initial_page["contrast_findings"] = updated_snapshot["contrast_findings"]
+            initial_page["countdown_findings"] = updated_snapshot["countdown_findings"]
             pages.extend(flow_pages)
             for flow_page in flow_pages:
                 visited.add(flow_page["url"])

@@ -186,3 +186,17 @@ Typen, siehe Bausteine-Abschnitt oben) — bewusst nur die deterministischen
 Typen, damit die Extension ohne Backend-Verbindung auskommt. Test-Stand:
 150 passed, 1 skipped (GTK). Offen: manueller Extension-Smoke-Test
 (`chrome://extensions`), noch nicht durchgeführt.
+
+**Lovable-Frontend angebunden (Stand 2026-08-23):** `frontend/` — Vite/
+React/shadcn-Frontend (Lovable-generiert, ursprünglich eigenes Repo
+`gentle-rework-lab`, jetzt ohne dessen Git-History hier eingebunden, siehe
+README "Frontend"-Abschnitt) läuft parallel zur Jinja2-Oberfläche auf
+einem eigenen Dev-Server (Port 8080) und spricht ein neues Read-only-
+JSON-API (`GET /api/scans`, `/api/scans/{id}`,
+`/api/scans/{id}/pages/{id}`, `app/main.py`) über CORS an
+(`FRONTEND_ORIGIN`-Env-Var, Default `http://localhost:8080`). Die Routen
+sind dünne Wrapper um die bestehenden `app/db.py`-Funktionen inkl.
+`_attach_display_fields`. `frontend/src/lib/api.ts` ist der Client dazu,
+wird aber noch **nirgends** aufgerufen — `Dashboard.tsx`/`CaseAnalysis.tsx`
+laufen weiterhin mit hartcodierten Mock-Daten, das Verdrahten auf echte
+Daten ist ein offener Folge-Schritt.

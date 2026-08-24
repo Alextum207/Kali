@@ -128,6 +128,50 @@ def find_trick_questions(dom_html: str) -> list[dict]:
     return findings
 
 
+# Narrow, high-precision signal for a single checkbox whose own label text
+# explicitly spells out that NOT checking it results in default consent —
+# e.g. Mailchimp's sign-up checkbox: "I don't want to receive emails...
+# By not checking the box, I agree to be opted in by default." Structurally
+# different from find_trick_questions (needs two adjacent checkboxes with
+# differing polarity) and find_preticked_checkboxes (needs `checked` set) —
+# this one is unchecked and alone, the trick is purely in the wording.
+# Deliberately narrow (both hint groups must co-occur) since a plain
+# opt-out checkbox ("Ich möchte keine Werbung erhalten") never needs to
+# state its own default-consequence — spelling that out is itself the tell.
+_NOT_CHECKING_HINTS = (
+    "not checking", "don't check", "do not check", "not check the box",
+    "nicht ankreuzt", "nicht anklickst", "nicht aktivierst", "nicht markierst",
+)
+_DEFAULT_CONSENT_HINTS = (
+    "by default", "automatically opted in", "automatically subscribed", "opted in by default",
+    "automatisch angemeldet", "automatisch abonniert", "standardmäßig", "per voreinstellung", "voreingestellt",
+)
+
+
+def find_default_consent_checkboxes(dom_html: str) -> list[dict]:
+    """Flags a single checkbox whose label text explicitly states that
+    leaving it unchecked results in default consent — see module comment
+    above for the Mailchimp example this mirrors."""
+    soup = BeautifulSoup(dom_html, "html.parser")
+    findings = []
+    for box in soup.find_all("input", {"type": "checkbox"}):
+        text = _label_text_for(soup, box).lower()
+        if not text:
+            continue
+        if any(h in text for h in _NOT_CHECKING_HINTS) and any(h in text for h in _DEFAULT_CONSENT_HINTS):
+            findings.append(
+                {
+                    "pattern_type": "Trick Questions",
+                    "confidence_score": 0.85,
+                    "evidence_data": {
+                        "selector": _selector_for(box),
+                        "quote": _label_text_for(soup, box),
+                    },
+                }
+            )
+    return findings
+
+
 def find_autoplay_media(dom_html: str) -> list[dict]:
     soup = BeautifulSoup(dom_html, "html.parser")
     findings = []

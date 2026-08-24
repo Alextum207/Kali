@@ -54,3 +54,21 @@ def test_finds_multiple_pattern_types_in_same_text():
     findings = find_regex_patterns(text)
     pattern_types = {f["pattern_type"] for f in findings}
     assert pattern_types == {"Fake Scarcity", "Fake Social Proof"}
+
+
+def test_scarcity_does_not_match_unrelated_rating_count_and_seller_line():
+    """Regression: a product card's rating count ("...39") immediately
+    followed by an unrelated "Verkauft von X" seller-attribution line (a
+    separate DOM block, joined by a newline in innerText) must not read as
+    "39 verkauft" (39 sold) — real bug report from a live Knuspr listing
+    page. The old `\\s*` between number and verb matched across that
+    newline; only same-line adjacency (a real "N Stück verkauft" phrase)
+    should count."""
+    text = "4,6 von 5 Sternen39\nVerkauft von Knuspr DE"
+    findings = find_regex_patterns(text)
+    assert not any(f["pattern_type"] == "Fake Scarcity" for f in findings)
+
+
+def test_finds_fake_scarcity_de_verkauft_phrase_still_works():
+    findings = find_regex_patterns("Nur noch 5 Stück verkauft, schnell zugreifen.")
+    assert any(f["pattern_type"] == "Fake Scarcity" for f in findings)

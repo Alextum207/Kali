@@ -1,0 +1,114 @@
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300;1,400;1,500;1,600;1,700&family=Inter:wght@400;500;600;700;800;900&family=Montserrat:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 0%;
+    --foreground: 0 0% 96%;
+
+    --card: 0 0% 0%;
+    --card-foreground: 0 0% 96%;
+
+    --popover: 0 0% 0%;
+    --popover-foreground: 0 0% 96%;
+
+    --primary: 48 100% 50%;
+    --primary-foreground: 0 0% 5%;
+
+    --secondary: 0 0% 0%;
+    --secondary-foreground: 0 0% 96%;
+
+    --muted: 0 0% 14%;
+    --muted-foreground: 0 0% 62%;
+
+    --accent: 48 100% 50%;
+    --accent-foreground: 0 0% 5%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 0 0% 16%;
+    --input: 0 0% 16%;
+    --ring: 48 100% 50%;
+
+    --radius: 0.5rem;
+
+    --sage: 48 100% 50%;
+    --sage-dark: 48 95% 45%;
+    --cream: 0 0% 7%;
+    --gold: 48 100% 50%;
+    --rose: 48 60% 70%;
+  }
+
+  .dark {
+    --background: 0 0% 0%;
+    --foreground: 0 0% 96%;
+    --card: 0 0% 0%;
+    --card-foreground: 0 0% 96%;
+    --popover: 0 0% 0%;
+    --popover-foreground: 0 0% 96%;
+    --primary: 48 100% 50%;
+    --primary-foreground: 0 0% 5%;
+    --secondary: 0 0% 0%;
+    --secondary-foreground: 0 0% 96%;
+    --muted: 0 0% 14%;
+    --muted-foreground: 0 0% 62%;
+    --accent: 48 100% 50%;
+    --accent-foreground: 0 0% 5%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 0 0% 16%;
+    --input: 0 0% 16%;
+    --ring: 48 100% 50%;
+  }
+
+  /* Light theme for the Kali landing page & dashboard */
+  .kali-light {
+    --background: 42 45% 92%;
+    --foreground: 60 4% 8%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 60 4% 8%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 60 4% 8%;
+
+    --primary: 64 72% 34%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 46 30% 87%;
+    --secondary-foreground: 60 4% 12%;
+
+    --muted: 46 22% 88%;
+    --muted-foreground: 45 6% 38%;
+
+    --accent: 64 72% 34%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 70% 50%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 44 16% 82%;
+    --input: 44 16% 82%;
+    --ring: 64 72% 34%;
+
+    color-scheme: light;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+}

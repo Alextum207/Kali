@@ -3,9 +3,11 @@ import json
 import logging
 import os
 import pathlib
+import re
 import tempfile
 import uuid
 
+from app.analysis.heuristics import find_countdown_elements
 from app.analysis.visual import contrast_ratio
 
 logger = logging.getLogger(__name__)
@@ -213,7 +215,12 @@ async def _matches_present_detector(page, data: dict) -> tuple[str, str] | None:
         if key == "$schema" or not isinstance(value, dict):
             continue
         for detector in value.get("detectors", []):
-            for matcher in detector.get("presentMatcher", []):
+            # ~19/205 vendored rules store presentMatcher as a single object
+            # instead of a list (e.g. chandago, cookieLab, EvidonIFrame) —
+            # normalize so both shapes iterate as matcher dicts.
+            present_matcher = detector.get("presentMatcher", [])
+            matchers = present_matcher if isinstance(present_matcher, list) else [present_matcher]
+            for matcher in matchers:
                 selector = matcher.get("target", {}).get("selector")
                 if not selector:
                     continue
@@ -225,6 +232,27 @@ async def _matches_present_detector(page, data: dict) -> tuple[str, str] | None:
                 if el:
                     return key, selector
     return None
+
+
+async def _detect_cookie_wall(page) -> bool:
+    """Passive-only check — never accepts or rejects anything, just reads
+    computed style. Called by apply_consent_rules only once a rule's banner
+    is already confirmed present on the page (that's the caller's job, not
+    this function's): a cookie wall is the *combination* of "a consent
+    banner is showing" AND "the main content is blocked from scrolling/
+    interaction" (`overflow: hidden` on <body>/<html>, the classic way a
+    banner-behind-a-modal locks the page) — deliberately a much stronger,
+    separate signal than `reject_option_missing` (which only means the
+    banner itself has no reject button, regardless of whether the rest of
+    the page is still usable underneath it)."""
+    try:
+        return await page.evaluate(
+            "() => getComputedStyle(document.body).overflow === 'hidden' "
+            "|| getComputedStyle(document.documentElement).overflow === 'hidden'"
+        )
+    except Exception as exc:  # noqa: BLE001 - deliberate broad catch, page state can vary
+        logger.debug("_detect_cookie_wall: check failed: %s", exc)
+        return False
 
 
 async def apply_consent_rules(page, rules_dir: str = DEFAULT_CONSENT_RULES_DIR) -> dict:
@@ -241,11 +269,18 @@ async def apply_consent_rules(page, rules_dir: str = DEFAULT_CONSENT_RULES_DIR) 
     malformed rule file is logged and skipped so it can never break a crawl.
 
     Returns a dict with `accept_style`/`reject_style` (each a style dict from
-    `_read_style`, or None if not found) and `reject_option_missing` (True
+    `_read_style`, or None if not found), `reject_option_missing` (True
     only when a rule's banner was confirmed present but neither a reject
-    click target nor a consent-toggle structure was found for it).
+    click target nor a consent-toggle structure was found for it), and
+    `cookie_wall_detected` (True when a banner was confirmed present AND
+    the page additionally blocks scrolling/interacting with the main
+    content — a distinct, stronger signal than a merely-missing reject
+    option, see `_detect_cookie_wall`).
     """
-    result = {"accept_style": None, "reject_style": None, "reject_option_missing": False}
+    result = {
+        "accept_style": None, "reject_style": None,
+        "reject_option_missing": False, "cookie_wall_detected": False,
+    }
     try:
         rules_path = pathlib.Path(rules_dir)
         if not rules_path.is_dir():
@@ -263,6 +298,9 @@ async def apply_consent_rules(page, rules_dir: str = DEFAULT_CONSENT_RULES_DIR) 
             present = await _matches_present_detector(page, data)
             if present is None:
                 continue
+
+            if not result["cookie_wall_detected"]:
+                result["cookie_wall_detected"] = await _detect_cookie_wall(page)
 
             found_reject_candidate = False
             for action in _iter_click_candidates(data):
@@ -332,14 +370,98 @@ async def _snapshot_page(page, skip_diff_sleep: bool = False, consent_result: di
         logger.debug("_snapshot_page: find_low_contrast_legal_text failed: %s", exc)
         contrast_findings = []
 
+    # Structural countdown candidates need the live page to verify (clock
+    # fast-forward + reload) — done here, not in the DOM-string-only
+    # analysis pipeline, same reason contrast_findings is computed here
+    # instead of there (page.content()/screenshot() are already captured
+    # above, so the reload verify_countdown_reset does internally can't
+    # invalidate anything this function still needs).
+    countdown_findings = find_countdown_elements(dom_after)
+    try:
+        await verify_countdown_reset(page, countdown_findings)
+    except Exception as exc:  # noqa: BLE001 - deliberate broad catch, page state can vary
+        logger.debug("_snapshot_page: verify_countdown_reset failed: %s", exc)
+
     return {
         "dom_before": dom_before,
         "dom_after": dom_after,
         "screenshot": screenshot,
         "button_styles": button_styles,
         "contrast_findings": contrast_findings,
+        "countdown_findings": countdown_findings,
         "reject_option_missing": consent_result.get("reject_option_missing", False),
+        "cookie_wall_detected": consent_result.get("cookie_wall_detected", False),
     }
+
+
+# Words that indicate a countdown correctly expired rather than restarting.
+_EXPIRY_WORDS = ("abgelaufen", "beendet", "expired", "vorbei")
+
+
+def _looks_reset(text_before: str, text_after: str) -> bool:
+    """Heuristic for 'did this countdown silently restart instead of
+    expiring': after fast-forwarding, does the text still contain a
+    two-digit-or-more number (a fresh mm:ss/hh:mm-ish value) without any
+    expiry wording? ponytail: digit-magnitude + keyword check, not a full
+    countdown-format parser — covers common "X Min/Std" phrasings, not
+    every one. Revisit if real scans show it missing/false-flagging often.
+    """
+    after_lower = text_after.lower()
+    if any(word in after_lower for word in _EXPIRY_WORDS):
+        return False
+    numbers_after = re.findall(r"\d{2,}", text_after)
+    return bool(numbers_after)
+
+
+async def verify_countdown_reset(page, findings: list[dict]) -> None:
+    """Behavioral verification for Fake-Urgency countdown findings: jump
+    the page's virtual clock forward and check whether the countdown text
+    still shows a fresh value instead of expiring — the "Countdown startet
+    nach Ablauf neu" test from the legal research sheet, via Playwright's
+    Clock API instead of really waiting. Mutates findings in place;
+    best-effort, never raises (a failed check just leaves the finding
+    as-is). No-op if there's nothing to verify.
+    ponytail: only catches client-computed countdowns (JS Date/timers) —
+    a countdown whose remaining value is re-fetched from the server on
+    each load isn't fooled by a client-side clock mock. Real limitation,
+    not a bug.
+    """
+    countdown_findings = [
+        f
+        for f in findings
+        if f.get("pattern_type") == "Fake Urgency" and f.get("evidence_data", {}).get("selector")
+    ]
+    if not countdown_findings:
+        return
+
+    for finding in countdown_findings:
+        selector = finding["evidence_data"]["selector"]
+        try:
+            # Install the clock, then reload: a setInterval already running
+            # from the original page load was created against the real
+            # clock and won't be affected by fast_forward — only timers
+            # created *after* install are clock-owned. Reloading makes the
+            # countdown script re-register its timer under the mock.
+            await page.clock.install()
+            await page.reload()
+            locator = page.locator(selector).first
+            text_before = await locator.inner_text(timeout=2000)
+            await page.clock.fast_forward("06:00:00")
+            text_after = await locator.inner_text(timeout=2000)
+        except Exception as exc:  # noqa: BLE001 - deliberate broad catch, page state can vary
+            logger.debug("verify_countdown_reset failed for %s: %s", selector, exc)
+            continue
+
+        if _looks_reset(text_before, text_after):
+            finding["confidence_score"] = round(min(finding["confidence_score"] + 0.25, 1.0), 2)
+            finding["evidence_data"]["clock_verified"] = (
+                "Zeit künstlich vorgespult (+6h) — Countdown zeigt weiterhin einen "
+                "frischen Restwert statt abgelaufen zu sein."
+            )
+        else:
+            finding["evidence_data"]["clock_verified"] = (
+                "Zeit künstlich vorgespult (+6h) — kein Reset erkannt."
+            )
 
 
 _CAPTCHA_MARKERS = (

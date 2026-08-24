@@ -22,6 +22,7 @@
                 "http://*/*",
                 "https://*/*"
             ],
+            "all_frames": true,
             "run_at": "document_idle"
         }
     ],
@@ -38,7 +39,8 @@
             "resources": [
                 "scripts/constants.js",
                 "scripts/consent.js",
-                "data/consent-rules.json"
+                "data/consent-rules.json",
+                "images/firefly-glow.webp"
             ],
             "matches": [
                 "http://*/*",

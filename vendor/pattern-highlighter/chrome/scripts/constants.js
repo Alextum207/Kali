@@ -13,7 +13,7 @@ const brw = chrome;
  *  - `detectionFunctions`: An array of functions `f(node, nodeOld)` to detect the pattern.
  *      Parameters of the functions are the HTML node to be examined in current and previous state (in this order).
  *      The functions must return `true` if the pattern was detected and `false` if not.
- *  - `infoUrl`: The URL to the explanation of the pattern on the `dapde.de` website.
+ *  - `infoUrl`: The URL to the explanation of the pattern (Verbraucherzentrale).
  *  - `info`: A brief explanation of the pattern.
  *  - `languages`: An array of ISO 639-1 codes of the languages supported by the detection functions..
  * @constant
@@ -30,6 +30,37 @@ const brw = chrome;
  */
 export const patternConfig = {
     patterns: [
+        {
+            /**
+             * Autoplay Pattern (Exploiting Addiction).
+             * Video/audio elements that start playing automatically, binding
+             * the user's attention without an active choice.
+             * Ported from Kali's app/analysis/heuristics.py:find_autoplay_media.
+             *
+             * Checked FIRST, ahead of the text-based patterns below:
+             * findPatterInNode() below assigns each element to only the
+             * first pattern that matches and then removes it from further
+             * search, so if a <video>/<audio> element's own text content
+             * (e.g. fallback content) happened to also match a later
+             * text-based pattern like Scarcity, this attribute check would
+             * never run for that element. A plain attribute check can never
+             * false-positive, so checking it first costs nothing and closes
+             * that gap.
+             */
+            name: brw.i18n.getMessage("patternAutoplay_name"),
+            className: "autoplay",
+            detectionFunctions: [
+                function (node, nodeOld) {
+                    return (node.tagName === "VIDEO" || node.tagName === "AUDIO") && node.hasAttribute("autoplay");
+                }
+            ],
+            infoUrl: brw.i18n.getMessage("patternAutoplay_infoUrl"),
+            info: brw.i18n.getMessage("patternAutoplay_info"),
+            languages: [
+                "en",
+                "de"
+            ]
+        },
         {
             /**
              * Countdown Pattern.
@@ -148,7 +179,15 @@ export const patternConfig = {
                     // The previous state of the element is not used.
                     // Example: "10 pieces available"
                     //          "99% claimed"
-                    return /\d+\s*(?:\%|pieces?|pcs\.?|pc\.?|ct\.?|items?)?\s*(?:available|sold|claimed|redeemed)|(?:last|final)\s*(?:article|item)/i.test(node.innerText);
+                    // [ \t]* instead of \s*: node.innerText inserts a real
+                    // newline at every block-level boundary, so \s* would
+                    // glue an unrelated number from one element (e.g. a
+                    // rating count) to a scarcity verb from the next,
+                    // completely unrelated one (e.g. "...39\nSold by X" ->
+                    // false "39 Sold"). [ \t]* only matches same-line/same-
+                    // phrase adjacency. Mirrors the same fix in Kali's
+                    // server-side app/analysis/regex_classify.py.
+                    return /\d+[ \t]*(?:\%|pieces?|pcs\.?|pc\.?|ct\.?|items?)?[ \t]*(?:available|sold|claimed|redeemed)|(?:last|final)[ \t]*(?:article|item)/i.test(node.innerText);
                 },
                 function (node, nodeOld) {
                     // Return true if a match is found in the current text of the element,
@@ -158,7 +197,8 @@ export const patternConfig = {
                     // The previous state of the element is not used.
                     // Example: "10 Stück verfügbar"
                     //          "99% eingelöst"
-                    return /\d+\s*(?:\%|stücke?|stk\.?)?\s*(?:verfügbar|verkauft|eingelöst)|letzter\s*Artikel/i.test(node.innerText);
+                    // Same [ \t]* fix as the English variant above.
+                    return /\d+[ \t]*(?:\%|stücke?|stk\.?)?[ \t]*(?:verfügbar|verkauft|eingelöst)|letzter[ \t]*Artikel/i.test(node.innerText);
                 }
             ],
             infoUrl: brw.i18n.getMessage("patternScarcity_infoUrl"),
@@ -186,7 +226,9 @@ export const patternConfig = {
                     // The previous state of the element is not used.
                     // Example: "5 other customers also bought this article"
                     //          "6 buyers have rated the following products [with 5 stars]"
-                    return /\d+\s*(?:other)?\s*(?:customers?|clients?|buyers?|users?|shoppers?|purchasers?|people)\s*(?:have\s+)?\s*(?:(?:also\s*)?(?:bought|purchased|ordered)|(?:rated|reviewed))\s*(?:this|the\s*following)\s*(?:product|article|item)s?/i.test(node.innerText);
+                    // [ \t]* instead of \s* — same block-boundary-gluing fix as
+                    // the Scarcity pattern above (see its comment).
+                    return /\d+[ \t]*(?:other)?[ \t]*(?:customers?|clients?|buyers?|users?|shoppers?|purchasers?|people)[ \t]*(?:have[ \t]+)?[ \t]*(?:(?:also[ \t]*)?(?:bought|purchased|ordered)|(?:rated|reviewed))[ \t]*(?:this|the[ \t]*following)[ \t]*(?:product|article|item)s?/i.test(node.innerText);
                 },
                 function (node, nodeOld) {
                     // Return true if a match is found in the current text of the element,
@@ -195,7 +237,8 @@ export const patternConfig = {
                     // The previous state of the element is not used.
                     // Example: "5 andere Kunden kauften auch diesen Artikel"
                     //          "6 Käufer*innen haben folgende Produkte [mit 5 Sternen bewertet]"
-                    return /\d+\s*(?:andere)?\s*(?:Kunden?|Käufer|Besteller|Nutzer|Leute|Person(?:en)?)(?:(?:\s*\/\s*)?[_\-\*]?innen)?\s*(?:(?:kauften|bestellten|haben)\s*(?:auch|ebenfalls)?|(?:bewerteten|rezensierten))\s*(?:diese[ns]?|(?:den|die|das)?\s*folgenden?)\s*(?:Produkte?|Artikel)/i.test(node.innerText);
+                    // Same [ \t]* fix as the English variant above.
+                    return /\d+[ \t]*(?:andere)?[ \t]*(?:Kunden?|Käufer|Besteller|Nutzer|Leute|Person(?:en)?)(?:(?:[ \t]*\/[ \t]*)?[_\-\*]?innen)?[ \t]*(?:(?:kauften|bestellten|haben)[ \t]*(?:auch|ebenfalls)?|(?:bewerteten|rezensierten))[ \t]*(?:diese[ns]?|(?:den|die|das)?[ \t]*folgenden?)[ \t]*(?:Produkte?|Artikel)/i.test(node.innerText);
                 }
             ],
             infoUrl: brw.i18n.getMessage("patternSocialProof_infoUrl"),
@@ -303,27 +346,6 @@ export const patternConfig = {
         },
         {
             /**
-             * Autoplay Pattern (Exploiting Addiction).
-             * Video/audio elements that start playing automatically, binding
-             * the user's attention without an active choice.
-             * Ported from Kali's app/analysis/heuristics.py:find_autoplay_media.
-             */
-            name: brw.i18n.getMessage("patternAutoplay_name"),
-            className: "autoplay",
-            detectionFunctions: [
-                function (node, nodeOld) {
-                    return (node.tagName === "VIDEO" || node.tagName === "AUDIO") && node.hasAttribute("autoplay");
-                }
-            ],
-            infoUrl: brw.i18n.getMessage("patternAutoplay_infoUrl"),
-            info: brw.i18n.getMessage("patternAutoplay_info"),
-            languages: [
-                "en",
-                "de"
-            ]
-        },
-        {
-            /**
              * Trick Questions Pattern.
              * Adjacent checkboxes whose labels switch negation polarity (one
              * phrased as opt-in, the next as opt-out), so a consistent-looking
@@ -370,6 +392,40 @@ export const patternConfig = {
                         return false;
                     }
                     return negationRe.test(textA) !== negationRe.test(textB);
+                },
+                function (node, nodeOld) {
+                    // Single checkbox whose own label explicitly states that
+                    // NOT checking it results in default consent — e.g.
+                    // Mailchimp's sign-up checkbox: "I don't want to receive
+                    // emails... By not checking the box, I agree to be
+                    // opted in by default." Structurally different from the
+                    // adjacent-pair check above (this is one checkbox,
+                    // alone, unchecked) and from pre-ticked-box (this one
+                    // is never checked() — the trick is purely in the
+                    // wording). Deliberately narrow (both hint groups must
+                    // co-occur): a plain opt-out checkbox never needs to
+                    // spell out its own default consequence — doing so is
+                    // itself the tell. Port of Kali's
+                    // app/analysis/heuristics.py:find_default_consent_checkboxes.
+                    if (node.tagName !== "INPUT" || node.type !== "checkbox") {
+                        return false;
+                    }
+                    const notCheckingRe = /not checking|don't check|do not check|not check the box|nicht ankreuzt|nicht anklickst|nicht aktivierst|nicht markierst/i;
+                    const defaultConsentRe = /by default|automatically opted in|automatically subscribed|opted in by default|automatisch angemeldet|automatisch abonniert|standardmäßig|per voreinstellung|voreingestellt/i;
+
+                    function labelTextFor(checkbox) {
+                        if (checkbox.id) {
+                            const label = checkbox.getRootNode().querySelector(`label[for="${checkbox.id}"]`);
+                            if (label) {
+                                return label.innerText;
+                            }
+                        }
+                        const parentLabel = checkbox.closest("label");
+                        return parentLabel ? parentLabel.innerText : "";
+                    }
+
+                    const text = labelTextFor(node);
+                    return !!text && notCheckingRe.test(text) && defaultConsentRe.test(text);
                 }
             ],
             infoUrl: brw.i18n.getMessage("patternTrickQuestions_infoUrl"),
@@ -587,3 +643,23 @@ export const currentPatternClassName = extensionClassPrefix + "current-pattern";
  * The elements with these tags are removed from the DOM copy.
  */
 export const tagBlacklist = ["script", "style", "noscript"];
+
+/**
+ * Maps each pattern's `className` to the German legal norm it violates, for
+ * the PDF report (report/report.js). Mirrors Kali's server-side NORM_MAP
+ * (app/compliance.py) for the same 8 pattern types this extension detects.
+ * @constant
+ * @type {Object.<string, string>}
+ */
+export const normMap = {
+    "countdown": "UWG §§ 5, 5a; Anhang zu § 3 Abs. 3",
+    "scarcity": "UWG §§ 5, 5a; Anhang zu § 3 Abs. 3",
+    "social-proof": "UWG §§ 5, 5a; Anhang zu § 3 Abs. 3",
+    "forced-continuity": "§ 312j Abs. 3, 4 BGB; Art. 246a EGBGB",
+    "pre-ticked-box": "Art. 4 Nr. 11, Art. 7 Abs. 4 DSGVO",
+    "autoplay": "Art. 25 DSA",
+    "trick-questions": "Art. 4 Nr. 11, Art. 7 Abs. 4 DSGVO",
+    "decoy-pricing": "UWG §§ 5, 5a; Anhang zu § 3 Abs. 3",
+    "cookie-banner-asymmetry": "Art. 25 DSA",
+    "cookie-banner-missing-reject": "Art. 4 Nr. 11, Art. 7 Abs. 4 DSGVO",
+};

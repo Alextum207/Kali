@@ -8,7 +8,7 @@ from app.site_crawler import crawl_site
 from app.analysis.pipeline import run_analysis, IMPACT_MAP
 from app.evidence import save_evidence, sha256_bytes, rfc3161_timestamp
 from app.compliance import fetch_citation, map_to_norm
-from app.db import insert_scan, insert_finding, insert_page
+from app.db import insert_scan, insert_finding, insert_page, mark_scan_status
 
 LEGAL_TEXT_MCP_BASE_URL = os.environ.get("LEGAL_TEXT_MCP_BASE_URL", "http://localhost:8091")
 
@@ -39,14 +39,23 @@ def _read_and_hash(path: str) -> str:
 
 def _crawl_time_findings(page_data: dict) -> list[dict]:
     """Findings that depend on crawl-time state run_analysis never sees
-    (contrast scan, infinite-scroll, missing cookie-banner reject option) —
-    shared by run_scan (single page) and _analyze_page (site crawl) so
-    neither path silently drops them."""
+    (contrast scan, infinite-scroll, missing cookie-banner reject option,
+    countdown-reset verification) — shared by run_scan (single page) and
+    _analyze_page (site crawl) so neither path silently drops them."""
     findings = []
     for contrast_finding in page_data.get("contrast_findings", []):
         contrast_finding["target_norm"] = map_to_norm(contrast_finding["pattern_type"])
         contrast_finding["evidence_data"]["impact"] = IMPACT_MAP.get(contrast_finding["pattern_type"], "–")
         findings.append(contrast_finding)
+
+    # Structural countdown candidates, already clock-verified by
+    # app/crawler.py::_snapshot_page while the page was still live (see
+    # verify_countdown_reset — needs a real page, can't run in the
+    # DOM-string-only analysis pipeline).
+    for countdown_finding in page_data.get("countdown_findings", []):
+        countdown_finding["target_norm"] = map_to_norm(countdown_finding["pattern_type"])
+        countdown_finding["evidence_data"]["impact"] = IMPACT_MAP.get(countdown_finding["pattern_type"], "–")
+        findings.append(countdown_finding)
 
     if page_data.get("infinite_scroll_detected"):
         findings.append({
@@ -66,6 +75,21 @@ def _crawl_time_findings(page_data: dict) -> list[dict]:
             "confidence_score": 0.5,
             "evidence_data": {
                 "impact": IMPACT_MAP.get("Fehlende Reject-Option (Cookie-Banner)", "–"),
+            },
+        })
+
+    # Distinct from "reject fehlt": a cookie wall additionally blocks the
+    # main content itself (overflow:hidden while the banner shows), not
+    # just the reject button being absent — see
+    # app/crawler.py::_detect_cookie_wall for the passive-only check.
+    if page_data.get("cookie_wall_detected"):
+        findings.append({
+            "pattern_type": "Cookie Wall",
+            "target_norm": map_to_norm("Cookie Wall"),
+            "confidence_score": 0.55,
+            "evidence_data": {
+                "note": "Hauptinhalt durch overflow:hidden blockiert, solange Consent-Banner sichtbar ist",
+                "impact": IMPACT_MAP.get("Cookie Wall", "–"),
             },
         })
 
@@ -103,6 +127,7 @@ async def run_scan(url: str, conn, evidence_dir: str, browser=None) -> int:
             finding["evidence_data"]["citation"] = citation_cache[norm]
             insert_finding(conn, scan_id, finding)
 
+    mark_scan_status(conn, scan_id, "done")
     return scan_id
 
 
@@ -154,11 +179,17 @@ async def run_site_scan(
     max_pages: int | None = None,
     llm_client=None,
     url_validator=None,
+    scan_id: int | None = None,
 ) -> int:
     if max_pages is None:
         max_pages = int(os.environ.get("MAX_PAGES_PER_SCAN", "15"))
 
-    scan_id = insert_scan(conn, start_url)
+    # scan_id is passed in when the caller (app.main's POST /scans) already
+    # created the row up front to redirect immediately and run the actual
+    # crawl in the background — insert_scan here only covers direct callers
+    # (tests, run_site_scan used standalone) that haven't done that.
+    if scan_id is None:
+        scan_id = insert_scan(conn, start_url)
 
     # url_validator is only forwarded when the caller overrides it (tests
     # exercising file:// fixtures, same pattern as crawl_site's own default
@@ -183,7 +214,7 @@ async def run_site_scan(
     citation_cache: dict[str, str | None] = {}
     sem = asyncio.Semaphore(_ANALYSIS_CONCURRENCY)
     async with httpx.AsyncClient(base_url=LEGAL_TEXT_MCP_BASE_URL, timeout=5.0) as client:
-        results = await asyncio.gather(*[
+        tasks = [
             _analyze_page(
                 page_id,
                 page_data,
@@ -196,10 +227,15 @@ async def run_site_scan(
                 llm_client=llm_client,
             )
             for page_id, page_data in zip(page_ids, site_result["pages"])
-        ])
+        ]
+        # as_completed instead of gather: write each page's findings to the
+        # DB as soon as its analysis finishes, not all at once at the end —
+        # this is what lets a client polling/reloading scan_detail.html see
+        # findings show up while the scan is still running.
+        for coro in asyncio.as_completed(tasks):
+            page_id, findings = await coro
+            for finding in findings:
+                insert_finding(conn, scan_id, finding, page_id=page_id)
 
-    for page_id, findings in results:
-        for finding in findings:
-            insert_finding(conn, scan_id, finding, page_id=page_id)
-
+    mark_scan_status(conn, scan_id, "done")
     return scan_id

@@ -1,6 +1,6 @@
 {
   "extName": {
-    "message": "Pattern Highlighter",
+    "message": "Kali",
     "description": "Der Name der Erweiterung."
   },
   "extDescription": {
@@ -27,6 +27,10 @@
     "message": "Pattern Highlighting wiederholen",
     "description": "Text für den Button um das Pattern Highlighting auf der Seite zu wiederholen."
   },
+  "buttonCreateReport": {
+    "message": "PDF-Report erstellen",
+    "description": "Text für den Button, der die Report-Seite mit dem aktuellen Fund-Stand zum Drucken/Speichern als PDF öffnet."
+  },
   "headingShowPattern": {
     "message": "Patterns anzeigen",
     "description": "Überschrift im Popup für die Buttons um einzelne Pattern-Elemente anzuzeigen."
@@ -41,7 +45,7 @@
   },
   "textMoreInformation": {
     "message": "Mehr Informationen zu Dark Pattern",
-    "description": "Text im Footer vor der Verlinkung zur dapde.de Webseite."
+    "description": "Text im Footer vor der Verlinkung zur Verbraucherzentrale-Webseite."
   },
   "infoExtensionStarted": {
     "message": "Pattern Highlighter gestartet.",
@@ -66,8 +70,8 @@
     "description": "Name des Countdown Pattern."
   },
   "patternCountdown_infoUrl": {
-    "message": "https://dapde.de/de/dark-patterns/arten-und-beispiele/druck2/",
-    "description": "URL zur Erklärung des Countdown Pattern auf der dapde.de Webseite."
+    "message": "https://www.verbraucherzentrale.de/wissen/digitale-welt/onlinedienste/dark-patterns-so-wollen-websites-und-apps-sie-manipulieren-58082",
+    "description": "URL zur Erklärung des Countdown Pattern auf der Verbraucherzentrale-Webseite."
   },
   "patternCountdown_info": {
     "message": "Countdown-Dark Patterns erwecken (wahrheitsgemäß oder fälschlicherweise) den Eindruck, eine Ware bzw. Dienstleistung ist nur noch für eine bestimmte Zeit verfügbar. Grafisch wird dies durch eine ablaufende Uhr oder Leiste verdeutlicht. Man kann zusehen, wie einem das gewünschte Gut davongleitet.",
@@ -78,8 +82,8 @@
     "description": "Name des Scarcity Pattern."
   },
   "patternScarcity_infoUrl": {
-    "message": "https://dapde.de/de/dark-patterns/arten-und-beispiele/druck2/",
-    "description": "URL zur Erklärung des Scarcity Pattern auf der dapde.de Webseite."
+    "message": "https://www.verbraucherzentrale.de/wissen/digitale-welt/onlinedienste/dark-patterns-so-wollen-websites-und-apps-sie-manipulieren-58082",
+    "description": "URL zur Erklärung des Scarcity Pattern auf der Verbraucherzentrale-Webseite."
   },
   "patternScarcity_info": {
     "message": "Das Scarcity-Pattern erweckt (wahrheitsgemäß oder fälschlicherweise) den Eindruck, eine Ware oder Dienstleistung ist nur noch in knapper Zahl verfügbar. Scarcity Patterns gibt es auch in Varianten, bei denen die angebliche Knappheit schlicht erfunden ist. Oder es wird zumindest nicht deutlich gemacht, ob sich die begrenzte Verfügbarkeit auf das Produkt insgesamt oder nur auf das Kontingent des besuchten Portals bezieht.",
@@ -90,8 +94,8 @@
     "description": "Name des Social Proof Pattern."
   },
   "patternSocialProof_infoUrl": {
-    "message": "https://dapde.de/de/dark-patterns/arten-und-beispiele/druck2/",
-    "description": "URL zur Erklärung des Social Proof Pattern auf der dapde.de Webseite."
+    "message": "https://www.verbraucherzentrale.de/wissen/digitale-welt/onlinedienste/dark-patterns-so-wollen-websites-und-apps-sie-manipulieren-58082",
+    "description": "URL zur Erklärung des Social Proof Pattern auf der Verbraucherzentrale-Webseite."
   },
   "patternSocialProof_info": {
     "message": "Das Social Proof-Dark Pattern setzt auf soziale Bewährtheit. Positive Produktbewertungen oder Aktivitätsmeldungen anderer Nutzer:innen werden direkt eingeblendet. Häufig sind diese Bewertungen oder Meldungen schlicht erfunden. Aber auch authentische Bewertungen oder Meldungen beeinflussen durch geschicktes Selektieren und Platzieren die Kaufentscheidung.",
@@ -102,8 +106,8 @@
     "description": "Name des Forced Continuity Pattern."
   },
   "patternForcedContinuity_infoUrl": {
-    "message": "https://dapde.de/de/dark-patterns/arten-und-beispiele/operativer-zwang2/",
-    "description": "URL zur Erklärung des Forced Continuity Pattern auf der dapde.de Webseite."
+    "message": "https://www.verbraucherzentrale.de/wissen/digitale-welt/onlinedienste/dark-patterns-so-wollen-websites-und-apps-sie-manipulieren-58082",
+    "description": "URL zur Erklärung des Forced Continuity Pattern auf der Verbraucherzentrale-Webseite."
   },
   "patternForcedContinuity_info": {
     "message": "Das Forced Continuity-Dark Pattern verlängert kostenlose oder günstig Probeabonnements automatisch – allerdings kostenpflichtig bzw. zu einem höheren Preis. Der Designtrick liegt darin, dass das Bestellformular auch optisch Kostenlosigkeit suggeriert und die (automatischen) Folgekosten verschleiert.",
@@ -114,8 +118,8 @@
     "description": "Name des Pre-ticked-Box Pattern."
   },
   "patternPreTickedBox_infoUrl": {
-    "message": "https://dapde.de/de/dark-patterns/arten-und-beispiele/",
-    "description": "URL zur Erklärung des Pre-ticked-Box Pattern auf der dapde.de Webseite."
+    "message": "https://www.verbraucherzentrale.de/wissen/digitale-welt/onlinedienste/dark-patterns-so-wollen-websites-und-apps-sie-manipulieren-58082",
+    "description": "URL zur Erklärung des Pre-ticked-Box Pattern auf der Verbraucherzentrale-Webseite."
   },
   "patternPreTickedBox_info": {
     "message": "Eine standardmäßig angehakte Checkbox verleitet Nutzer:innen dazu, einer Sache (z.B. einem Newsletter) zuzustimmen, ohne eine aktive Wahl zu treffen.",
@@ -126,8 +130,8 @@
     "description": "Name des Autoplay Pattern."
   },
   "patternAutoplay_infoUrl": {
-    "message": "https://dapde.de/de/dark-patterns/arten-und-beispiele/",
-    "description": "URL zur Erklärung des Autoplay Pattern auf der dapde.de Webseite."
+    "message": "https://www.verbraucherzentrale.de/wissen/digitale-welt/onlinedienste/dark-patterns-so-wollen-websites-und-apps-sie-manipulieren-58082",
+    "description": "URL zur Erklärung des Autoplay Pattern auf der Verbraucherzentrale-Webseite."
   },
   "patternAutoplay_info": {
     "message": "Video- oder Audio-Elemente, die automatisch abspielen, binden die Aufmerksamkeit der Nutzer:innen ohne aktive Entscheidung.",
@@ -138,8 +142,8 @@
     "description": "Name des Trick-Questions Pattern."
   },
   "patternTrickQuestions_infoUrl": {
-    "message": "https://dapde.de/de/dark-patterns/arten-und-beispiele/",
-    "description": "URL zur Erklärung des Trick-Questions Pattern auf der dapde.de Webseite."
+    "message": "https://www.verbraucherzentrale.de/wissen/digitale-welt/onlinedienste/dark-patterns-so-wollen-websites-und-apps-sie-manipulieren-58082",
+    "description": "URL zur Erklärung des Trick-Questions Pattern auf der Verbraucherzentrale-Webseite."
   },
   "patternTrickQuestions_info": {
     "message": "Benachbarte Checkboxen, deren Beschriftungen die Verneinungs-Polarität wechseln, sodass eine einheitlich wirkende Checkbox-Liste bei schnellem Lesen das Gegenteil des Gemeinten bedeutet.",
@@ -150,8 +154,8 @@
     "description": "Name des Decoy-Pricing Pattern."
   },
   "patternDecoyPricing_infoUrl": {
-    "message": "https://dapde.de/de/dark-patterns/arten-und-beispiele/",
-    "description": "URL zur Erklärung des Decoy-Pricing Pattern auf der dapde.de Webseite."
+    "message": "https://www.verbraucherzentrale.de/wissen/digitale-welt/onlinedienste/dark-patterns-so-wollen-websites-und-apps-sie-manipulieren-58082",
+    "description": "URL zur Erklärung des Decoy-Pricing Pattern auf der Verbraucherzentrale-Webseite."
   },
   "patternDecoyPricing_info": {
     "message": "Eine Preisstufe kostet nur geringfügig mehr als eine benachbarte, bietet aber unverhältnismäßig mehr Leistung – die Nutzer:innen werden so zur teureren Option gelenkt.",
@@ -162,8 +166,8 @@
     "description": "Name des Cookie-Banner-Asymmetrie Pattern."
   },
   "patternCookieBannerAsymmetry_infoUrl": {
-    "message": "https://dapde.de/de/dark-patterns/arten-und-beispiele/",
-    "description": "URL zur Erklärung des Cookie-Banner-Asymmetrie Pattern auf der dapde.de Webseite."
+    "message": "https://www.verbraucherzentrale.de/wissen/digitale-welt/onlinedienste/dark-patterns-so-wollen-websites-und-apps-sie-manipulieren-58082",
+    "description": "URL zur Erklärung des Cookie-Banner-Asymmetrie Pattern auf der Verbraucherzentrale-Webseite."
   },
   "patternCookieBannerAsymmetry_info": {
     "message": "Der \"Alle akzeptieren\"-Button im Cookie-Banner ist deutlich größer oder kontrastreicher gestaltet als der \"Ablehnen\"-Button, was Nutzer:innen optisch zur Zustimmung drängt.",
@@ -174,8 +178,8 @@
     "description": "Name des Fehlende-Reject-Option Pattern."
   },
   "patternCookieBannerMissingReject_infoUrl": {
-    "message": "https://dapde.de/de/dark-patterns/arten-und-beispiele/",
-    "description": "URL zur Erklärung des Fehlende-Reject-Option Pattern auf der dapde.de Webseite."
+    "message": "https://www.verbraucherzentrale.de/wissen/digitale-welt/onlinedienste/dark-patterns-so-wollen-websites-und-apps-sie-manipulieren-58082",
+    "description": "URL zur Erklärung des Fehlende-Reject-Option Pattern auf der Verbraucherzentrale-Webseite."
   },
   "patternCookieBannerMissingReject_info": {
     "message": "Das Cookie-Banner bietet keine gleichwertige Möglichkeit, alle nicht notwendigen Cookies mit einem Klick abzulehnen.",

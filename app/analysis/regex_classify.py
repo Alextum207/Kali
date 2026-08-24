@@ -22,10 +22,10 @@ _PATTERNS = [
     (
         "Fake Scarcity",
         re.compile(
-            r"\d+\s*(?:\%|pieces?|pcs\.?|pc\.?|ct\.?|items?)?\s*(?:available|sold|claimed|redeemed)"
-            r"|(?:last|final)\s*(?:article|item)"
-            r"|\d+\s*(?:\%|stücke?|stk\.?)?\s*(?:verfügbar|verkauft|eingelöst)"
-            r"|letzter\s*Artikel",
+            r"\d+[ \t]*(?:\%|pieces?|pcs\.?|pc\.?|ct\.?|items?)?[ \t]*(?:available|sold|claimed|redeemed)"
+            r"|(?:last|final)[ \t]*(?:article|item)"
+            r"|\d+[ \t]*(?:\%|stücke?|stk\.?)?[ \t]*(?:verfügbar|verkauft|eingelöst)"
+            r"|letzter[ \t]*Artikel",
             re.IGNORECASE,
         ),
         0.85,
@@ -33,10 +33,10 @@ _PATTERNS = [
     (
         "Fake Social Proof",
         re.compile(
-            r"\d+\s*(?:other)?\s*(?:customers?|clients?|buyers?|users?|shoppers?|purchasers?|people)"
-            r"\s*(?:have\s+)?\s*(?:(?:also\s*)?(?:bought|purchased|ordered)|(?:rated|reviewed))"
-            r"|\d+\s*(?:andere)?\s*(?:Kunden?|Käufer|Besteller|Nutzer|Leute)"
-            r"\s*(?:haben\s+)?\s*(?:(?:auch\s*)?(?:gekauft|bestellt)|(?:bewertet|rezensiert))",
+            r"\d+[ \t]*(?:other)?[ \t]*(?:customers?|clients?|buyers?|users?|shoppers?|purchasers?|people)"
+            r"[ \t]*(?:have[ \t]+)?[ \t]*(?:(?:also[ \t]*)?(?:bought|purchased|ordered)|(?:rated|reviewed))"
+            r"|\d+[ \t]*(?:andere)?[ \t]*(?:Kunden?|Käufer|Besteller|Nutzer|Leute)"
+            r"[ \t]*(?:haben[ \t]+)?[ \t]*(?:(?:auch[ \t]*)?(?:gekauft|bestellt)|(?:bewertet|rezensiert))",
             re.IGNORECASE,
         ),
         0.85,
@@ -44,8 +44,8 @@ _PATTERNS = [
     (
         "Forced Continuity",
         re.compile(
-            r"(?:€|EUR|GBP|£|\$|USD)\s*\d+(?:\.\d{2})?\s*(?:after|from\s*month)"
-            r"|\d+(?:,\d{2})?\s*(?:Euro|€)\s*(?:ab\s*dem\s*\d+\.\s*Monat|nach)",
+            r"(?:€|EUR|GBP|£|\$|USD)[ \t]*\d+(?:\.\d{2})?[ \t]*(?:after|from[ \t]*month)"
+            r"|\d+(?:,\d{2})?[ \t]*(?:Euro|€)[ \t]*(?:ab[ \t]*dem[ \t]*\d+\.[ \t]*Monat|nach)",
             re.IGNORECASE,
         ),
         0.85,

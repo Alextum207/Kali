@@ -104,6 +104,10 @@ brw.runtime.onMessage.addListener(
             // Highlight/show a single pattern element that was selected in the popup.
             showElement(message.showElement);
             sendResponse({ success: true });
+        } else if (message.action === "getReportData") {
+            // Compute the current findings for the PDF report and send them
+            // as the response (see popup.js's ReportButton).
+            sendResponse(getReportData());
         } else if ("setActivation" in message) {
             // Live-toggle the extension for this tab without requiring a page reload.
             if (message.setActivation === true) {
@@ -189,7 +193,16 @@ async function patternHighlighting(waitForChanges = false) {
     // the LIVE document (not the cloned trees above) and tags its matched
     // elements directly — it doesn't fit the per-node findPatternDeep walk
     // (see scripts/consent.js's module docstring for why).
-    await applyCookieBannerChecks();
+    // Best-effort, like Python's apply_consent_rules: a broken/unexpected
+    // rule shape here must never abort the rest of the pipeline below
+    // (sendResults + unlocking + re-arming the observer) — that previously
+    // left the popup permanently empty and all future re-scans (e.g. a
+    // running countdown's next tick) silently dead for the whole tab.
+    try {
+        await applyCookieBannerChecks();
+    } catch (e) {
+        console.error("Cookie-banner check failed:", e);
+    }
 
     // Send the information about the detected patterns to the other extension scripts.
     sendResults();
@@ -300,7 +313,7 @@ function removeBlacklistNodes(dom) {
  * Checks a DOM node for patterns. This is done using the detection functions defined in the `patternConfig`.
  * @param {Node} node The DOM node to be inspected for patterns.
  * @param {Node} [nodeOld] The previous state of the DOM node to be checked for patterns, if present.
- * @returns {(string|null)} The class name of the pattern type, if one was detected, otherwise `null`.
+ * @returns {(Object|null)} The matched pattern object from `patternConfig`, if one was detected, otherwise `null`.
  */
 function findPatterInNode(node, nodeOld) {
     // Iterate over all patterns in the `patternConfig`.
@@ -310,13 +323,88 @@ function findPatterInNode(node, nodeOld) {
             // Pass the two parameters to the detection function and check if the pattern is detected.
             if (func(node, nodeOld)) {
                 // If the detection function returns `true`, the respective pattern was detected.
-                // The class name of the pattern is returned and the function terminates.
-                return pattern.className;
+                // The matched pattern object is returned and the function terminates.
+                return pattern;
             }
         }
     }
     return null;
 }
+
+// (elem, details) pairs whose icon position needs to follow elem — see
+// _repositionExplainIcons. Appended to as icons are created, never pruned
+// (matches the rest of this file: detected elements aren't expected to
+// disappear from the live page within one analysis pass).
+const _phTrackedIcons = [];
+
+/**
+ * Adds a clickable "explain" icon near a detected-pattern element. Uses the
+ * native <details>/<summary> disclosure widget so click-to-open/close needs
+ * no JS state or outside-click handling. Appended to document.body (not as
+ * a child of elem) so it isn't clipped by elem's own overflow/positioning;
+ * kept aligned with elem on scroll/resize via _repositionExplainIcons.
+ * @param {HTMLElement} elem The detected element to anchor the icon near.
+ * @param {object} pattern The matched pattern object (needs .info, .infoUrl).
+ */
+function addExplainIcon(elem, pattern) {
+    if (elem.dataset.phInfoIcon) {
+        return;
+    }
+    elem.dataset.phInfoIcon = "1";
+
+    const details = document.createElement("details");
+    details.className = constants.extensionClassPrefix + "info-icon";
+
+    const summary = document.createElement("summary");
+    const icon = document.createElement("img");
+    // Cropped + background-removed from the Kali brand animation
+    // (noch ergämnzen/Firefly_starts_to_glow_...gif) — see
+    // vendor/pattern-highlighter/chrome/images/firefly-glow.webp.
+    icon.src = brw.runtime.getURL("images/firefly-glow.webp");
+    icon.alt = "";
+    summary.appendChild(icon);
+    details.appendChild(summary);
+
+    const info = document.createElement("p");
+    info.textContent = pattern.info;
+    details.appendChild(info);
+
+    if (pattern.infoUrl) {
+        const link = document.createElement("a");
+        link.href = pattern.infoUrl;
+        link.target = "_blank";
+        link.rel = "noopener";
+        link.textContent = "Mehr erfahren";
+        details.appendChild(link);
+    }
+
+    document.body.appendChild(details);
+    _phTrackedIcons.push({ elem, details });
+    _positionExplainIcon(elem, details);
+}
+
+/**
+ * Places one icon at elem's current top-right corner, converting elem's
+ * viewport-relative rect to document coordinates (works for `position:
+ * absolute` regardless of window vs. inner-container scrolling, since
+ * getBoundingClientRect() always reflects elem's current on-screen spot).
+ */
+function _positionExplainIcon(elem, details) {
+    const rect = elem.getBoundingClientRect();
+    details.style.top = (rect.top + window.scrollY - 10) + "px";
+    details.style.left = (rect.right + window.scrollX - 10) + "px";
+}
+
+/** Re-reads every tracked icon's anchor element and repositions it — called
+ * on scroll/resize so icons stay pinned to their box instead of drifting. */
+function _repositionExplainIcons() {
+    for (const { elem, details } of _phTrackedIcons) {
+        _positionExplainIcon(elem, details);
+    }
+}
+
+window.addEventListener("scroll", _repositionExplainIcons, { passive: true, capture: true });
+window.addEventListener("resize", _repositionExplainIcons, { passive: true });
 
 /**
  * Recursively finds patterns within a DOM tree or node.
@@ -348,8 +436,13 @@ function findPatternDeep(node, domOld) {
             // and a class for the specific pattern the element represents.
             elem.classList.add(
                 constants.patternDetectedClassName,
-                constants.extensionClassPrefix + foundPattern
+                constants.extensionClassPrefix + foundPattern.className
             );
+            // Show the pattern's explanation as a native tooltip on hover,
+            // plus a clickable icon (native <details>/<summary>, no JS
+            // open/close state needed) that opens the same explanation.
+            elem.title = foundPattern.info;
+            addExplainIcon(elem, foundPattern);
         }
         // Remove the previous state of the node, if it exists.
         if (nodeOld) {
@@ -451,6 +544,45 @@ function getPatternsResults() {
     }
     // Return the complete result object.
     return results;
+}
+
+/**
+ * Builds the data for the PDF report (report/report.js): one entry per
+ * pattern type that currently has at least one detected element on the
+ * page, with its legal norm (constants.normMap), a plain-English impact
+ * description (pattern.info — the same text already shown as a tooltip in
+ * the popup's found-patterns list), a short text excerpt from the first
+ * matched element as a quote/example, and how many elements matched.
+ * popup.js separately captures a screenshot of the visible tab and
+ * report.js shows that same full screenshot for every finding (not cropped
+ * to the element) — see report.js.
+ * @returns {{url: string, generatedAt: string, items: Array<object>}}
+ */
+function getReportData() {
+    let items = [];
+    // Same guard as getPatternsResults() — nothing to report before the
+    // extension has activated at least once in this tab.
+    if (constants) {
+        for (const pattern of constants.patternConfig.patterns) {
+            const elements = document.getElementsByClassName(constants.extensionClassPrefix + pattern.className);
+            if (elements.length === 0) {
+                continue;
+            }
+            const quoteSource = elements[0].innerText;
+            items.push({
+                pattern_type: pattern.name,
+                norm: constants.normMap[pattern.className] || "–",
+                impact: pattern.info,
+                quote: quoteSource ? quoteSource.trim().slice(0, 200) : "",
+                count: elements.length,
+            });
+        }
+    }
+    return {
+        url: location.href,
+        generatedAt: new Date().toISOString(),
+        items,
+    };
 }
 
 /**

@@ -1,0 +1,51 @@
+// Thin client for the FastAPI backend's read-only JSON API (app/main.py's
+// /api/scans routes). Not yet called from any page — that's the next step,
+// wiring Dashboard.tsx/CaseAnalysis.tsx onto these instead of their mock data.
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+
+export interface Finding {
+  id: number;
+  scan_id: number;
+  pattern_type: string;
+  target_norm: string;
+  confidence_score: number;
+  evidence_data: Record<string, unknown>;
+  created_at: string;
+  page_id: number | null;
+  page_url: string;
+  screenshot_url: string | null;
+}
+
+export interface Page {
+  id: number;
+  scan_id: number;
+  url: string;
+  category: string | null;
+  crawled_at: string;
+}
+
+export interface Scan {
+  id: number;
+  url: string;
+  status: "running" | "done" | "error";
+  started_at: string;
+  finished_at: string | null;
+  risk: number;
+}
+
+async function getJSON<T>(path: string): Promise<T> {
+  const res = await fetch(`${API_BASE_URL}${path}`);
+  if (!res.ok) {
+    throw new Error(`${path} -> ${res.status}`);
+  }
+  return res.json();
+}
+
+export const getScans = () => getJSON<Scan[]>("/api/scans");
+
+export const getScan = (scanId: number) =>
+  getJSON<{ scan: Scan; pages: Page[]; findings: Finding[] }>(`/api/scans/${scanId}`);
+
+export const getPageFindings = (scanId: number, pageId: number) =>
+  getJSON<{ scan: Scan; findings: Finding[] }>(`/api/scans/${scanId}/pages/${pageId}`);

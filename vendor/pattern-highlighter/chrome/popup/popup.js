@@ -45,6 +45,41 @@ async function getCurrentTab() {
 }
 
 /**
+ * Merges per-frame getPatternsResults()-shaped objects into one combined
+ * result. content.js now runs in every frame (manifest.json's
+ * content_scripts has `all_frames: true`, so iframe-embedded dark patterns
+ * — e.g. an embedded cookie-consent widget — get scanned too), so each
+ * frame reports independently via its own message and must be summed here
+ * rather than the popup just keeping whichever message arrived last.
+ * Element phids are only unique WITHIN one frame (each frame's own
+ * addPhidForEveryElement counter starts at 0), so they're rewritten here to
+ * "<frameId>:<phid>"; ShowPatternButtons.showPattern() below decodes that
+ * prefix to target the right frame when jumping to an element.
+ * @param {Map<number, object>} frameResults frameId -> raw per-frame result
+ * @returns {object} Combined {patterns, countVisible, count}
+ */
+function mergeFrameResults(frameResults) {
+    const patternsByName = new Map();
+    let countVisible = 0;
+    let count = 0;
+    for (const [frameId, result] of frameResults) {
+        countVisible += result.countVisible || 0;
+        count += result.count || 0;
+        for (const pattern of result.patterns || []) {
+            const existing = patternsByName.get(pattern.name) || { name: pattern.name, elementsVisible: [], elementsHidden: [] };
+            existing.elementsVisible = existing.elementsVisible.concat(
+                pattern.elementsVisible.map((phid) => `${frameId}:${phid}`)
+            );
+            existing.elementsHidden = existing.elementsHidden.concat(
+                pattern.elementsHidden.map((phid) => `${frameId}:${phid}`)
+            );
+            patternsByName.set(pattern.name, existing);
+        }
+    }
+    return { patterns: Array.from(patternsByName.values()), countVisible, count };
+}
+
+/**
  * Lit component for the entire popup.
  * Uses all other Lit components defined below.
  * @extends LitElement
@@ -79,6 +114,11 @@ export class ExtensionPopup extends LitElement {
         this.initActivation = this.activation;
         // Set the results initially to an empty dictionary. The true results will be loaded later.
         this.results = {};
+        // Raw per-frame results (frameId -> message), merged into
+        // `this.results` via mergeFrameResults() on every update — see its
+        // docstring above for why a straight overwrite is wrong once
+        // content.js also runs inside iframes.
+        this._frameResults = new Map();
     }
 
     /**
@@ -92,8 +132,10 @@ export class ExtensionPopup extends LitElement {
         if ("countVisible" in message) {
             // Check if the message was sent by the active tab from the current window.
             if (sender.tab.active && (await getCurrentTab()).windowId === sender.tab.windowId) {
-                // Set the `results` property of the popup to the data from the message.
-                this.results = message;
+                // Record this frame's results and recombine with every
+                // other frame's latest results (main frame + any iframes).
+                this._frameResults.set(sender.frameId, message);
+                this.results = mergeFrameResults(this._frameResults);
             }
         }
     }
@@ -129,7 +171,17 @@ export class ExtensionPopup extends LitElement {
                 while (true) {
                     try {
                         // Load the results of the pattern detection.
-                        this.results = await brw.tabs.sendMessage(currentTab.id, { action: "getPatternCount" });
+                        // frameId: 0 is required, not optional — without it,
+                        // tabs.sendMessage broadcasts to EVERY frame in the
+                        // tab (all_frames: true means that now includes ad/
+                        // tracking iframes) and returns whichever frame's
+                        // content script happens to answer first, which is
+                        // not necessarily the main frame. Any iframe's own
+                        // results still arrive separately via
+                        // handleMessage()'s push and get merged in then.
+                        const mainFrameResult = await brw.tabs.sendMessage(currentTab.id, { action: "getPatternCount" }, { frameId: 0 });
+                        this._frameResults.set(0, mainFrameResult);
+                        this.results = mergeFrameResults(this._frameResults);
                         // Break out of the infinite loop if the request did not throw an error.
                         break;
                     } catch (error) {
@@ -156,6 +208,7 @@ export class ExtensionPopup extends LitElement {
             <popup-header></popup-header>
             <on-off-switch .activation=${this.activation} .app=${this}></on-off-switch>
             <redo-button .activation=${this.initActivation}></redo-button>
+            <report-button .activation=${this.initActivation}></report-button>
             <found-patterns-list .activation=${this.initActivation} .results=${this.results}></found-patterns-list>
             <show-pattern-button .activation=${this.initActivation} .results=${this.results}></show-pattern-button>
             <supported-patterns-list></supported-patterns-list>
@@ -172,11 +225,35 @@ customElements.define("extension-popup", ExtensionPopup);
  */
 export class PopupHeader extends LitElement {
     // CSS styles for the HTML elements in the component.
+    // Colors match the Kali brand palette (frontend/src/index.css's
+    // .kali-light theme: cream background, olive-gold primary).
     static styles = [
         sharedStyles,
         css`
+            .brand {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 8px;
+                margin: 12px auto 4px;
+            }
+
+            .brand img {
+                width: 28px;
+                height: 28px;
+                object-fit: contain;
+            }
+
+            .brand span {
+                font-family: "Cormorant Garamond", Georgia, serif;
+                font-weight: 700;
+                font-size: 1.6em;
+                letter-spacing: 0.15em;
+                color: #8D9518;
+            }
+
             h3 {
-                color: red;
+                color: #D92626;
             }
         `
     ];
@@ -187,7 +264,10 @@ export class PopupHeader extends LitElement {
      */
     render() {
         return html`
-        <h1>${brw.i18n.getMessage("extName")}</h1>
+        <div class="brand">
+            <img src="../images/kali-logo.png" alt="${brw.i18n.getMessage("extName")}">
+            <span>KALI</span>
+        </div>
         ${!constants.patternConfigIsValid ?
                 html`<h3>${brw.i18n.getMessage("errorInvalidConfig")}<h3>` : html``}
       `;
@@ -309,6 +389,71 @@ export class RedoButton extends LitElement {
 customElements.define("redo-button", RedoButton);
 
 /**
+ * Lit component for the "create PDF report" button of the popup.
+ * @extends LitElement
+ */
+export class ReportButton extends LitElement {
+    // Reactive properties
+    static properties = {
+        // Variable for the activation state of the component.
+        activation: { type: Number }
+    };
+
+    // CSS styles for the HTML elements in the component.
+    static styles = [
+        sharedStyles,
+        actionButtonStyles
+    ];
+
+    /**
+     * Fetches the current findings from the content script, captures a
+     * screenshot of the visible tab (best-effort — report.js falls back to
+     * "no screenshot" if this fails, e.g. on a chrome:// page; note this is
+     * the visible viewport only, not the full scrollable page — a Chrome
+     * extension API limitation, not a choice), stores both for the report
+     * page to read, and opens that page in a new tab. The report page then
+     * triggers the browser's print dialog so the user can save it as a
+     * PDF — no PDF library, no backend call.
+     * @param {Event} event
+     */
+    async createReport(event) {
+        const tab = await getCurrentTab();
+        // frameId: 0 is required, not optional — see the identical comment
+        // on the getPatternCount call in firstUpdated() above. Without it,
+        // an ad/tracking iframe on the page could answer instead of the
+        // real page, corrupting the report's url/findings with the iframe's
+        // own (e.g. a raw ad-network tracking URL as `url`).
+        const reportData = await brw.tabs.sendMessage(tab.id, { action: "getReportData" }, { frameId: 0 });
+        let screenshot = null;
+        try {
+            screenshot = await brw.tabs.captureVisibleTab(tab.windowId, { format: "png" });
+        } catch (e) {
+            // best-effort, see docstring above.
+        }
+        await brw.storage.local.set({ reportData: { ...reportData, screenshot } });
+        await brw.tabs.create({ url: brw.runtime.getURL("report/report.html") });
+    }
+
+    /**
+     * Render the HTML of the component.
+     * @returns {html} HTML of the component
+     */
+    render() {
+        // Return an empty string if the component is not activated.
+        if (this.activation !== activationState.On) {
+            return html``;
+        }
+        return html`
+        <div>
+            <span @click=${this.createReport}>${brw.i18n.getMessage("buttonCreateReport")}</span>
+        </div>
+      `;
+    }
+}
+// Define a custom element for the component so that it can be used in the HTML DOM.
+customElements.define("report-button", ReportButton);
+
+/**
  * Lit component for the list of the detected patterns in the popup.
  * @extends LitElement
  */
@@ -372,7 +517,9 @@ export class ShowPatternButtons extends LitElement {
         // Variable for the results of the pattern detection from the content script.
         results: { type: Object },
         // Variable for the pattern highlighter ID of the currently selected pattern.
-        _currentPatternId: { type: Number, state: true },
+        // A "<frameId>:<phid>" string (see mergeFrameResults() above), not
+        // a plain number — phids are only unique within one frame.
+        _currentPatternId: { type: String, state: true },
         // Variable for the list of visible detected patterns.
         _visiblePatterns: { type: Array, state: true }
     };
@@ -424,7 +571,7 @@ export class ShowPatternButtons extends LitElement {
 
     /**
      * Get the index of an element in the `_visiblePatterns` array by its pattern highlighter ID.
-     * @param {number} phid The pattern highlighter ID.
+     * @param {string} phid The "<frameId>:<phid>" composite pattern highlighter ID.
      * @returns {number|-1} The index of the element with the `phid` in the `_visiblePatterns` array
      * or `-1` if the element is not in the array.
      */
@@ -475,8 +622,15 @@ export class ShowPatternButtons extends LitElement {
         }
         // Set the ID of the currently shown element to the ID of the element at the new index.
         this._currentPatternId = this._visiblePatterns[idx].phid;
-        // Send a message to the content script to show the element with the ID of `_currentPatternId`.
-        await brw.tabs.sendMessage((await getCurrentTab()).id, { "showElement": this._currentPatternId });
+        // Decode the "<frameId>:<phid>" composite (see mergeFrameResults())
+        // and target that specific frame — required once results can come
+        // from an iframe, not just the main frame.
+        const [frameIdStr, rawPhid] = String(this._currentPatternId).split(":");
+        await brw.tabs.sendMessage(
+            (await getCurrentTab()).id,
+            { "showElement": Number(rawPhid) },
+            { frameId: Number(frameIdStr) }
+        );
     }
 
     /**
@@ -639,7 +793,7 @@ export class PopupFooter extends LitElement {
     render() {
         return html`
         <div>
-            ${brw.i18n.getMessage("textMoreInformation")}: <a href="https://dapde.de/" target="_blank">dapde.de</a>.
+            ${brw.i18n.getMessage("textMoreInformation")}: <a href="https://www.verbraucherzentrale.de/wissen/digitale-welt/onlinedienste/dark-patterns-so-wollen-websites-und-apps-sie-manipulieren-58082" target="_blank">verbraucherzentrale.de</a>.
         </div>
       `;
     }

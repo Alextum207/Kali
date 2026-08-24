@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Vergleich Scan {{ scan_a.id }} vs {{ scan_b.id }} – Kali{% endblock %}
+{% block content %}
+<h1>Scan-Vergleich</h1>
+<p>Scan #{{ scan_a.id }} ({{ scan_a.started_at }}) vs. Scan #{{ scan_b.id }} ({{ scan_b.started_at }}) — {{ scan_a.url }}</p>
+
+<h2>Neu</h2>
+{% if not new_in_b %}
+<p>Keine neuen Funde.</p>
+{% else %}
+<ul>
+  {% for pattern_type, target_norm, page_url in new_in_b %}
+  <li>{{ pattern_type }} — {{ target_norm }} — {{ page_url }}</li>
+  {% endfor %}
+</ul>
+{% endif %}
+
+<h2>Behoben</h2>
+{% if not resolved %}
+<p>Keine behobenen Funde.</p>
+{% else %}
+<ul>
+  {% for pattern_type, target_norm, page_url in resolved %}
+  <li>{{ pattern_type }} — {{ target_norm }} — {{ page_url }}</li>
+  {% endfor %}
+</ul>
+{% endif %}
+
+<h2>Unverändert</h2>
+{% if not unchanged %}
+<p>Keine unveränderten Funde.</p>
+{% else %}
+<ul>
+  {% for pattern_type, target_norm, page_url in unchanged %}
+  <li>{{ pattern_type }} — {{ target_norm }} — {{ page_url }}</li>
+  {% endfor %}
+</ul>
+{% endif %}
+{% endblock %}

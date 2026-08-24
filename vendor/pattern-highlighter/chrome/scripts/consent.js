@@ -91,7 +91,13 @@ export function matchesPresentDetector(data) {
     for (const [key, value] of Object.entries(data)) {
         if (key === "$schema" || typeof value !== "object" || value === null) continue;
         for (const detector of value.detectors || []) {
-            for (const matcher of detector.presentMatcher || []) {
+            // ~19/205 vendored rules store presentMatcher as a single object
+            // instead of an array (e.g. chandago, cookieLab, EvidonIFrame) —
+            // normalize so both shapes iterate as matcher objects. Mirrors
+            // the same fix in app/crawler.py's _matches_present_detector.
+            const presentMatcher = detector.presentMatcher;
+            const matchers = Array.isArray(presentMatcher) ? presentMatcher : (presentMatcher ? [presentMatcher] : []);
+            for (const matcher of matchers) {
                 const selector = matcher.target && matcher.target.selector;
                 if (!selector) continue;
                 try {

@@ -23,7 +23,7 @@ export const sharedStyles = css`
     }
 
     * {
-        font-family: "Trebuchet MS", "Arial", sans-serif;
+        font-family: "Montserrat", system-ui, sans-serif;
     }
 `;
 
@@ -38,9 +38,11 @@ export const patternLinkStyles = css`
     }
 `;
 
+// Olive-gold, matching the Kali brand primary color
+// (frontend/src/index.css's .kali-light --primary: hsl(64 72% 34%)).
 export const actionButtonStyles = css`
     div span {
-        color: #217284;
+        color: #8D9518;
         font-weight: bold;
         cursor: pointer;
         text-decoration: none;
@@ -52,7 +54,7 @@ export const actionButtonStyles = css`
 
     @media (prefers-color-scheme: dark) {
         div {
-            color: #33bfde;
+            color: #FFCC00;
         }
     }
 `;
@@ -123,7 +125,7 @@ export const onOffSwitchStyles = css`
     .onoffswitch-inner:before {
         content: "${unsafeCSS(brw.i18n.getMessage("buttonOnState"))}";
         padding-left: 10px;
-        background-color: #34A7C1;
+        background-color: #8D9518;
         color: #FFFFFF;
     }
 
@@ -162,7 +164,7 @@ export const onOffSwitchStyles = css`
         }
     
         .onoffswitch-inner:before {
-            background-color: #33bfde;
+            background-color: #FFCC00;
             color: #000000;
         }
     }
