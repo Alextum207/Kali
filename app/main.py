@@ -24,6 +24,7 @@ from app.compliance import EVIDENCE_HINTS, aggregate_risk_score
 from app.db import (
     init_db, get_scan, get_findings, get_pages, get_page_findings, list_scans,
     insert_scan, mark_scan_status, set_human_review, list_scans_by_url,
+    get_pattern_stats, get_market_summary,
 )
 from app.robots import RobotsDisallowedError
 from app.scan import run_site_scan
@@ -115,6 +116,13 @@ def dashboard(request: Request, conn: sqlite3.Connection = Depends(_get_conn)):
     for scan in scans:
         scan["risk"] = aggregate_risk_score(get_findings(conn, scan["id"]))
     return templates.TemplateResponse(request, "dashboard.html", {"scans": scans})
+
+
+@app.get("/market", response_class=HTMLResponse)
+def market(request: Request, conn: sqlite3.Connection = Depends(_get_conn)):
+    stats = get_pattern_stats(conn)
+    summary = get_market_summary(conn)
+    return templates.TemplateResponse(request, "market.html", {"stats": stats, "summary": summary})
 
 
 @app.get("/api/scans")

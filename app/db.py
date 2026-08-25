@@ -167,3 +167,25 @@ def list_scans(conn: sqlite3.Connection) -> list[dict]:
 def list_scans_by_url(conn: sqlite3.Connection, url: str) -> list[dict]:
     rows = conn.execute("SELECT * FROM scans WHERE url = ? ORDER BY id DESC", (url,)).fetchall()
     return [dict(row) for row in rows]
+
+
+def get_pattern_stats(conn: sqlite3.Connection) -> list[dict]:
+    rows = conn.execute(
+        """
+        SELECT pattern_type,
+               COUNT(*) AS finding_count,
+               COUNT(DISTINCT scan_id) AS scan_count,
+               AVG(confidence_score) AS avg_confidence
+        FROM findings
+        GROUP BY pattern_type
+        ORDER BY finding_count DESC
+        """
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def get_market_summary(conn: sqlite3.Connection) -> dict:
+    row = conn.execute(
+        "SELECT COUNT(*) AS total_scans, COUNT(DISTINCT url) AS total_domains FROM scans"
+    ).fetchone()
+    return dict(row)

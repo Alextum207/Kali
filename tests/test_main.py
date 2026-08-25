@@ -125,6 +125,36 @@ def test_compare_scans_shows_new_and_resolved_findings(tmp_path, monkeypatch):
     assert "Confirm Shaming" in text.split("Behoben")[1].split("Unverändert")[0]  # resolved section
 
 
+def test_market_page_aggregates_findings_across_scans(tmp_path, monkeypatch):
+    monkeypatch.setattr(main_module, "DB_PATH", str(tmp_path / "test.db"))
+
+    from app.db import init_db, insert_scan, insert_finding
+
+    conn = init_db(str(tmp_path / "test.db"))
+    scan_a = insert_scan(conn, "https://shop-a.example.com")
+    insert_finding(conn, scan_a, {
+        "pattern_type": "Fake Urgency", "target_norm": "UWG",
+        "confidence_score": 0.8, "evidence_data": {},
+    })
+    scan_b = insert_scan(conn, "https://shop-b.example.com")
+    insert_finding(conn, scan_b, {
+        "pattern_type": "Fake Urgency", "target_norm": "UWG",
+        "confidence_score": 0.6, "evidence_data": {},
+    })
+    insert_finding(conn, scan_b, {
+        "pattern_type": "Confirm Shaming", "target_norm": "Art. 25 DSA",
+        "confidence_score": 0.9, "evidence_data": {},
+    })
+
+    with TestClient(main_module.app) as client:
+        response = client.get("/market")
+
+    assert response.status_code == 200
+    text = response.text
+    assert text.index("Fake Urgency") < text.index("Confirm Shaming")
+    assert "2" in text
+
+
 def test_scan_report_404_for_missing_scan(tmp_path, monkeypatch):
     monkeypatch.setattr(main_module, "DB_PATH", str(tmp_path / "test.db"))
     with TestClient(main_module.app) as client:
