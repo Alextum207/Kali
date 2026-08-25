@@ -1,8 +1,11 @@
 import asyncio
+import io
 import os
 import time
 
 import pytest
+from PIL import Image
+
 from app.db import init_db, get_findings
 from app.evidence import sha256_bytes
 from app.scan import run_scan
@@ -10,6 +13,13 @@ from app.db import get_pages, get_page_findings
 from app.scan import run_site_scan
 
 FAKE_HAR_BYTES = b'{"log": {"fake": true}}'
+
+
+def _fake_png() -> bytes:
+    img = Image.new("RGB", (400, 300), color="white")
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
 
 
 def _fake_crawl_result(har_dir):
@@ -99,6 +109,91 @@ async def test_run_scan_includes_contrast_and_reject_option_findings(tmp_path, m
     assert by_type["Visuelle Tarnung (Kontrast)"]["evidence_data"]["impact"] != "–"
     assert by_type["Fehlende Reject-Option (Cookie-Banner)"]["evidence_data"]["impact"] != "–"
     assert by_type["Fehlende Reject-Option (Cookie-Banner)"]["target_norm"] == "Art. 4 Nr. 11, Art. 7 Abs. 4 DSGVO"
+
+
+@pytest.mark.asyncio
+async def test_run_scan_attaches_banner_screenshot_only_to_cookie_findings(tmp_path, monkeypatch):
+    """The pre-close banner screenshot (app/crawler.py::apply_consent_rules)
+    is evidence for the cookie-banner findings specifically — other
+    findings on the same page must not get it attached."""
+    async def fake_crawl_page(url, browser, har_dir=None):
+        result = _fake_crawl_result(har_dir)
+        result["reject_option_missing"] = True
+        result["banner_screenshot"] = b"\x89PNG-fake-banner-bytes"
+        return result
+
+    async def fake_run_analysis(dom_html, button_styles, llm_client=None):
+        return [
+            {
+                "pattern_type": "Pre-ticked Box",
+                "target_norm": "Art. 4 Nr. 11, Art. 7 Abs. 4 DSGVO",
+                "confidence_score": 0.9,
+                "evidence_data": {"selector": "#nl"},
+            }
+        ]
+
+    async def fake_fetch_citation(norm, base_url, client=None):
+        return None
+
+    monkeypatch.setattr("app.scan.crawl_page", fake_crawl_page)
+    monkeypatch.setattr("app.scan.run_analysis", fake_run_analysis)
+    monkeypatch.setattr("app.scan.fetch_citation", fake_fetch_citation)
+    monkeypatch.setattr("app.scan.rfc3161_timestamp", lambda data: None)
+
+    conn = init_db(":memory:")
+    scan_id = await run_scan("https://example.com", conn, str(tmp_path), browser=None)
+
+    findings = get_findings(conn, scan_id)
+    by_type = {f["pattern_type"]: f for f in findings}
+    assert "banner_screenshot_path" in by_type["Fehlende Reject-Option (Cookie-Banner)"]["evidence_data"]
+    assert "banner_screenshot_path" not in by_type["Pre-ticked Box"]["evidence_data"]
+
+
+@pytest.mark.asyncio
+async def test_run_scan_attaches_annotated_screenshot_to_quote_bearing_finding(tmp_path, monkeypatch):
+    """A finding with an evidence_data["quote"] (regex/LLM text findings)
+    gets a screenshot_annotated_path when the crawl captured text_boxes and
+    one of them matches — a finding without a quote never gets one."""
+    async def fake_crawl_page(url, browser, har_dir=None):
+        result = _fake_crawl_result(har_dir)
+        result["screenshot"] = _fake_png()
+        result["text_boxes"] = [
+            {"text": "9,99 Euro ab dem 2. Monat", "x": 10, "y": 10, "width": 100, "height": 20},
+        ]
+        return result
+
+    async def fake_run_analysis(dom_html, button_styles, llm_client=None):
+        return [
+            {
+                "pattern_type": "Forced Continuity",
+                "target_norm": "§ 312j Abs. 3, 4 BGB; Art. 246a EGBGB",
+                "confidence_score": 0.85,
+                "evidence_data": {"quote": "9,99 Euro ab dem 2. Monat"},
+            },
+            {
+                "pattern_type": "Pre-ticked Box",
+                "target_norm": "Art. 4 Nr. 11, Art. 7 Abs. 4 DSGVO",
+                "confidence_score": 0.9,
+                "evidence_data": {"selector": "#nl"},
+            },
+        ]
+
+    async def fake_fetch_citation(norm, base_url, client=None):
+        return None
+
+    monkeypatch.setattr("app.scan.crawl_page", fake_crawl_page)
+    monkeypatch.setattr("app.scan.run_analysis", fake_run_analysis)
+    monkeypatch.setattr("app.scan.fetch_citation", fake_fetch_citation)
+    monkeypatch.setattr("app.scan.rfc3161_timestamp", lambda data: None)
+
+    conn = init_db(":memory:")
+    scan_id = await run_scan("https://example.com", conn, str(tmp_path), browser=None)
+
+    findings = get_findings(conn, scan_id)
+    by_type = {f["pattern_type"]: f for f in findings}
+    assert "screenshot_annotated_path" in by_type["Forced Continuity"]["evidence_data"]
+    assert os.path.isfile(by_type["Forced Continuity"]["evidence_data"]["screenshot_annotated_path"])
+    assert "screenshot_annotated_path" not in by_type["Pre-ticked Box"]["evidence_data"]
 
 
 @pytest.mark.asyncio

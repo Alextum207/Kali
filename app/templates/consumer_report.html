@@ -14,7 +14,10 @@
   <p>{{ descriptions.get(f.pattern_type, "Keine Beschreibung verfügbar.") }}</p>
   {% if f.evidence_data.get("cross_session_match") %}<p class="hint">{{ f.evidence_data.get("cross_session_match") }}</p>{% endif %}
   {% if f.page_url %}<p class="hint">Gefunden auf: <a href="{{ f.page_url }}" target="_blank">{{ f.page_url }}</a></p>{% endif %}
-  {% if f.screenshot_url %}<p><a href="{{ f.screenshot_url }}" target="_blank">Screenshot ansehen</a></p>{% endif %}
+  {% if f.screenshot_annotated_url %}<p><a href="{{ f.screenshot_annotated_url }}" target="_blank">Screenshot mit markierter Stelle ansehen</a></p>
+  {% elif f.screenshot_url %}<p><a href="{{ f.screenshot_url }}" target="_blank">Screenshot ansehen</a></p>{% endif %}
+  {% if f.banner_screenshot_url %}<p><a href="{{ f.banner_screenshot_url }}" target="_blank">Cookie-Banner (vor dem Schließen) ansehen</a></p>{% endif %}
+  {% if f.baseline_screenshot_url %}<p><a href="{{ f.baseline_screenshot_url }}" target="_blank">Preis davor ansehen</a></p>{% endif %}
 </div>
 {% endfor %}
 {% endif %}

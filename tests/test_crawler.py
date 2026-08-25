@@ -14,6 +14,7 @@ from app.crawler import (
     _looks_like_captcha,
     _matches_present_detector,
     _detect_cookie_wall,
+    _capture_text_element_boxes,
     verify_countdown_reset,
     LEGAL_TEXT_KEYWORDS,
 )
@@ -207,6 +208,22 @@ async def test_find_low_contrast_legal_text_flags_camouflaged_clause():
 
 
 @pytest.mark.asyncio
+async def test_capture_text_element_boxes_returns_position_and_text():
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        page = await browser.new_page()
+        await page.goto(FIXTURE_URL)
+        boxes = await _capture_text_element_boxes(page)
+        await browser.close()
+
+    texts = {b["text"] for b in boxes}
+    assert "Akzeptieren" in texts
+    assert "Ablehnen" in texts
+    accept_box = next(b for b in boxes if b["text"] == "Akzeptieren")
+    assert accept_box["width"] > 0 and accept_box["height"] > 0
+
+
+@pytest.mark.asyncio
 async def test_apply_consent_rules_scopes_reddit_rules_bare_button_selector(tmp_path):
     """Regression test: reddit.json's only actionable rule is a bare "button"
     selector that only makes sense scoped to its `parent`/`childFilter`
@@ -397,6 +414,38 @@ async def test_apply_consent_rules_does_not_flag_missing_reject_when_banner_abse
         await browser.close()
 
     assert result["reject_option_missing"] is False
+
+
+@pytest.mark.asyncio
+async def test_apply_consent_rules_captures_banner_screenshot_before_reject_click(tmp_path):
+    """A screenshot of the banner must exist as its own evidence artifact,
+    taken before the reject click removes it from the page — otherwise
+    there's no proof of what the banner actually looked like."""
+    rules_dir = _write_rule(tmp_path, "asymmetric.json", ASYMMETRIC_RULE)
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        page = await browser.new_page()
+        await page.goto(ASYMMETRIC_CONSENT_FIXTURE_URL)
+        result = await apply_consent_rules(page, rules_dir)
+        await browser.close()
+
+    assert result["banner_screenshot"] is not None
+    assert isinstance(result["banner_screenshot"], bytes)
+
+
+@pytest.mark.asyncio
+async def test_apply_consent_rules_banner_screenshot_none_when_no_banner_present(tmp_path):
+    rules_dir = _write_rule(tmp_path, "no_reject.json", NO_REJECT_RULE)
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        page = await browser.new_page()
+        await page.goto(FIXTURE_URL)
+        result = await apply_consent_rules(page, rules_dir)
+        await browser.close()
+
+    assert result["banner_screenshot"] is None
 
 
 COUNTDOWN_RESET_FIXTURE_URL = pathlib.Path(__file__).parent.joinpath(

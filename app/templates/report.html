@@ -71,10 +71,20 @@
       <td>{{ f.page_url or "–" }}</td>
       <td>{{ f.created_at }}</td>
       <td>
-        {% if f.evidence_data.get("screenshot_data_uri") %}
+        {% if f.evidence_data.get("screenshot_annotated_data_uri") %}
+        <img src="{{ f.evidence_data.get('screenshot_annotated_data_uri') }}" alt="Screenshot mit markierter Textstelle" style="max-width:150px;border:1px solid #D8D5CA;">
+        {% elif f.evidence_data.get("screenshot_data_uri") %}
         <img src="{{ f.evidence_data.get('screenshot_data_uri') }}" alt="Screenshot" style="max-width:150px;border:1px solid #D8D5CA;">
         {% else %}
         {{ f.screenshot_url or "–" }}
+        {% endif %}
+        {% if f.evidence_data.get("banner_screenshot_data_uri") %}
+        <br><span class="hint">Cookie-Banner vorher:</span><br>
+        <img src="{{ f.evidence_data.get('banner_screenshot_data_uri') }}" alt="Cookie-Banner vor dem Schließen" style="max-width:150px;border:1px solid #D8D5CA;">
+        {% endif %}
+        {% if f.evidence_data.get("baseline_screenshot_data_uri") %}
+        <br><span class="hint">Preis davor:</span><br>
+        <img src="{{ f.evidence_data.get('baseline_screenshot_data_uri') }}" alt="Preis vor dem Anstieg" style="max-width:150px;border:1px solid #D8D5CA;">
         {% endif %}
       </td>
       <td>

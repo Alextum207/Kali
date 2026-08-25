@@ -295,6 +295,7 @@ async def apply_consent_rules(page, rules_dir: str = DEFAULT_CONSENT_RULES_DIR) 
     result = {
         "accept_style": None, "reject_style": None,
         "reject_option_missing": False, "cookie_wall_detected": False,
+        "banner_screenshot": None,
     }
     try:
         rules_path = pathlib.Path(rules_dir)
@@ -313,6 +314,15 @@ async def apply_consent_rules(page, rules_dir: str = DEFAULT_CONSENT_RULES_DIR) 
             present = await _matches_present_detector(page, data)
             if present is None:
                 continue
+
+            if result["banner_screenshot"] is None:
+                # Evidence of what the banner actually looked like, taken
+                # before any reject click below removes it from the page —
+                # the click only fires later in this same loop iteration.
+                try:
+                    result["banner_screenshot"] = await page.screenshot()
+                except Exception as exc:  # noqa: BLE001 - deliberate broad catch, page state can vary
+                    logger.debug("apply_consent_rules: banner screenshot failed: %s", exc)
 
             if not result["cookie_wall_detected"]:
                 result["cookie_wall_detected"] = await _detect_cookie_wall(page)
@@ -404,6 +414,8 @@ async def _snapshot_page_impl(page, skip_diff_sleep: bool, consent_result: dict 
     except Exception as exc:  # noqa: BLE001 - deliberate broad catch, page state can vary
         logger.debug("_snapshot_page: verify_countdown_reset failed: %s", exc)
 
+    text_boxes = await _capture_text_element_boxes(page)
+
     return {
         "dom_before": dom_before,
         "dom_after": dom_after,
@@ -413,6 +425,8 @@ async def _snapshot_page_impl(page, skip_diff_sleep: bool, consent_result: dict 
         "countdown_findings": countdown_findings,
         "reject_option_missing": consent_result.get("reject_option_missing", False),
         "cookie_wall_detected": consent_result.get("cookie_wall_detected", False),
+        "banner_screenshot": consent_result.get("banner_screenshot"),
+        "text_boxes": text_boxes,
     }
 
 
@@ -627,6 +641,31 @@ async def crawl_page(
     await context.close()  # flushes the HAR file to disk
 
     return {**snapshot, "har_path": har_path}
+
+
+async def _capture_text_element_boxes(page) -> list[dict]:
+    """Leaf-Text-Elemente mit Position — Rohmaterial, um ein Fund-Zitat
+    später (nach Schluss des Browsers) im Screenshot einzukreisen, siehe
+    app/analysis/screenshot_annotate.py. Reine Datensammlung, keine
+    Klassifikation — die passiert weiterhin erst in app/analysis/* nach
+    dem Crawl, die Trennung Crawler/Analyse bleibt gewahrt."""
+    try:
+        return await page.eval_on_selector_all(
+            "body *",
+            """els => els
+                .filter(el => el.children.length === 0 && el.textContent.trim().length > 0)
+                .map(el => {
+                    const r = el.getBoundingClientRect();
+                    return {
+                        text: el.textContent.trim().slice(0, 300),
+                        x: r.x, y: r.y, width: r.width, height: r.height,
+                    };
+                })
+                .filter(b => b.width > 0 && b.height > 0)""",
+        )
+    except Exception as exc:  # noqa: BLE001 - deliberate broad catch, page state can vary
+        logger.debug("_capture_text_element_boxes failed: %s", exc)
+        return []
 
 
 async def find_low_contrast_legal_text(page) -> list[dict]:

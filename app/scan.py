@@ -6,6 +6,7 @@ import httpx
 from app.crawler import crawl_page
 from app.site_crawler import crawl_site
 from app.analysis.pipeline import run_analysis, IMPACT_MAP
+from app.analysis.screenshot_annotate import highlight_quote_in_screenshot
 from app.evidence import save_evidence, sha256_bytes, rfc3161_timestamp
 from app.compliance import fetch_citation, map_to_norm
 from app.db import insert_scan, insert_finding, insert_page, mark_scan_status
@@ -24,6 +25,40 @@ _ANALYSIS_CONCURRENCY = int(os.environ.get("SCAN_ANALYSIS_CONCURRENCY", "5"))
 # so they aren't garbage-collected mid-flight — asyncio only holds a weak
 # reference to a task once nothing else does.
 _background_tasks: set = set()
+
+# Findings _crawl_time_findings builds directly from apply_consent_rules's
+# consent_result (app/crawler.py) — the only ones a pre-close banner
+# screenshot is evidence for.
+_COOKIE_BANNER_PATTERN_TYPES = ("Fehlende Reject-Option (Cookie-Banner)", "Cookie Wall")
+
+
+async def _save_banner_screenshot(page_data: dict, out_path: str) -> tuple[str | None, str | None]:
+    """(path, sha256) for the pre-close cookie-banner screenshot, or
+    (None, None) if this page never showed one (the common case — most
+    pages don't re-show a banner once cookies are set)."""
+    banner_screenshot = page_data.get("banner_screenshot")
+    if not banner_screenshot:
+        return None, None
+    banner_hash = await asyncio.to_thread(save_evidence, banner_screenshot, out_path)
+    return out_path, banner_hash
+
+
+async def _save_annotated_screenshot(
+    page_data: dict, quote: str, screenshot_bytes: bytes, out_path: str
+) -> tuple[str | None, str | None]:
+    """(path, sha256) for a copy of the page screenshot with the box that
+    best matches `quote` highlighted, or (None, None) if there are no
+    captured text boxes for this page or none of them match well enough —
+    the finding then falls back to the plain screenshot, same as before
+    this feature existed."""
+    text_boxes = page_data.get("text_boxes")
+    if not text_boxes:
+        return None, None
+    annotated = await asyncio.to_thread(highlight_quote_in_screenshot, screenshot_bytes, quote, text_boxes)
+    if annotated is None:
+        return None, None
+    annotated_hash = await asyncio.to_thread(save_evidence, annotated, out_path)
+    return out_path, annotated_hash
 
 
 def _fire_and_forget(coro) -> None:
@@ -120,16 +155,32 @@ async def run_scan(url: str, conn, evidence_dir: str, browser=None) -> int:
 
     har_hash = await asyncio.to_thread(_read_and_hash, crawl_result["har_path"])
 
+    banner_screenshot_path, banner_screenshot_hash = await _save_banner_screenshot(
+        crawl_result, os.path.join(evidence_dir, f"scan_{scan_id}_banner_screenshot.png")
+    )
+
     findings = await run_analysis(crawl_result["dom_after"], crawl_result["button_styles"])
     findings.extend(_crawl_time_findings(crawl_result))
 
     citation_cache: dict[str, str | None] = {}
     async with httpx.AsyncClient(base_url=LEGAL_TEXT_MCP_BASE_URL, timeout=5.0) as client:
-        for finding in findings:
+        for i, finding in enumerate(findings):
             finding["evidence_data"]["screenshot_path"] = screenshot_path
             finding["evidence_data"]["screenshot_sha256"] = screenshot_hash
             finding["evidence_data"]["har_path"] = crawl_result["har_path"]
             finding["evidence_data"]["har_sha256"] = har_hash
+            if banner_screenshot_path and finding["pattern_type"] in _COOKIE_BANNER_PATTERN_TYPES:
+                finding["evidence_data"]["banner_screenshot_path"] = banner_screenshot_path
+                finding["evidence_data"]["banner_screenshot_sha256"] = banner_screenshot_hash
+            quote = finding["evidence_data"].get("quote")
+            if quote:
+                annotated_path, annotated_hash = await _save_annotated_screenshot(
+                    crawl_result, quote, crawl_result["screenshot"],
+                    os.path.join(evidence_dir, f"scan_{scan_id}_finding_{i}_annotated.png"),
+                )
+                if annotated_path:
+                    finding["evidence_data"]["screenshot_annotated_path"] = annotated_path
+                    finding["evidence_data"]["screenshot_annotated_sha256"] = annotated_hash
             norm = finding["target_norm"]
             if norm not in citation_cache:
                 citation_cache[norm] = await fetch_citation(norm, LEGAL_TEXT_MCP_BASE_URL, client=client)
@@ -149,6 +200,8 @@ async def _analyze_page(
     screenshot_path: str,
     har_path: str,
     har_hash: str,
+    banner_screenshot_path: str,
+    evidence_dir: str,
     llm_client=None,
 ) -> tuple[int, list[dict]]:
     async with sem:
@@ -157,17 +210,31 @@ async def _analyze_page(
         )
         _fire_and_forget(asyncio.to_thread(rfc3161_timestamp, page_data["screenshot"]))
 
+        saved_banner_path, banner_hash = await _save_banner_screenshot(page_data, banner_screenshot_path)
+
         findings = await run_analysis(
             page_data["dom_after"], page_data["button_styles"], llm_client=llm_client
         )
 
         findings.extend(_crawl_time_findings(page_data))
 
-        for finding in findings:
+        for i, finding in enumerate(findings):
             finding["evidence_data"]["screenshot_path"] = screenshot_path
             finding["evidence_data"]["screenshot_sha256"] = screenshot_hash
             finding["evidence_data"]["har_path"] = har_path
             finding["evidence_data"]["har_sha256"] = har_hash
+            if saved_banner_path and finding["pattern_type"] in _COOKIE_BANNER_PATTERN_TYPES:
+                finding["evidence_data"]["banner_screenshot_path"] = saved_banner_path
+                finding["evidence_data"]["banner_screenshot_sha256"] = banner_hash
+            quote = finding["evidence_data"].get("quote")
+            if quote:
+                annotated_path, annotated_hash = await _save_annotated_screenshot(
+                    page_data, quote, page_data["screenshot"],
+                    os.path.join(evidence_dir, f"scan_page_{page_id}_finding_{i}_annotated.png"),
+                )
+                if annotated_path:
+                    finding["evidence_data"]["screenshot_annotated_path"] = annotated_path
+                    finding["evidence_data"]["screenshot_annotated_sha256"] = annotated_hash
             norm = finding["target_norm"]
             # ponytail: citation_cache dict has a benign race under
             # concurrency (two tasks both miss the cache and double-fetch
@@ -233,6 +300,8 @@ async def run_site_scan(
                 os.path.join(evidence_dir, f"scan_{scan_id}_page_{page_id}_screenshot.png"),
                 site_result["har_path"],
                 har_hash,
+                os.path.join(evidence_dir, f"scan_{scan_id}_page_{page_id}_banner_screenshot.png"),
+                evidence_dir,
                 llm_client=llm_client,
             )
             for page_id, page_data in zip(page_ids, site_result["pages"])

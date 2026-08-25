@@ -107,12 +107,23 @@ def _attach_display_fields(findings: list[dict], pages: list[dict], scan_url: st
     """Adds page_url (via page_id -> pages.url, falling back to the scan's
     own URL for single-page scans without a page_id) and screenshot_url
     (served through /evidence/<basename>) to each finding, for the
-    Link/Screenshot columns in scan_detail.html and report.html."""
+    Link/Screenshot columns in scan_detail.html and report.html. Same
+    pattern for banner_screenshot_url (cookie-banner findings only) and
+    screenshot_annotated_url (quote-bearing findings only)."""
     url_by_page_id = {p["id"]: p["url"] for p in pages}
     for f in findings:
         f["page_url"] = url_by_page_id.get(f.get("page_id"), scan_url)
-        screenshot_path = f.get("evidence_data", {}).get("screenshot_path")
+        evidence_data = f.get("evidence_data", {})
+        screenshot_path = evidence_data.get("screenshot_path")
         f["screenshot_url"] = f"/evidence/{os.path.basename(screenshot_path)}" if screenshot_path else None
+        banner_screenshot_path = evidence_data.get("banner_screenshot_path")
+        f["banner_screenshot_url"] = (
+            f"/evidence/{os.path.basename(banner_screenshot_path)}" if banner_screenshot_path else None
+        )
+        annotated_path = evidence_data.get("screenshot_annotated_path")
+        f["screenshot_annotated_url"] = f"/evidence/{os.path.basename(annotated_path)}" if annotated_path else None
+        baseline_path = evidence_data.get("baseline_screenshot_path")
+        f["baseline_screenshot_url"] = f"/evidence/{os.path.basename(baseline_path)}" if baseline_path else None
     return findings
 
 

@@ -337,6 +337,8 @@ async def _walk_category_flow(
                     "infinite_scroll_detected": False,
                     "reject_option_missing": snapshot.get("reject_option_missing", False),
                     "cookie_wall_detected": snapshot.get("cookie_wall_detected", False),
+                    "banner_screenshot": snapshot.get("banner_screenshot"),
+                    "text_boxes": snapshot.get("text_boxes", []),
                 }
             )
 
@@ -444,6 +446,8 @@ async def crawl_site(
                 "infinite_scroll_detected": infinite_scroll,
                 "reject_option_missing": snapshot["reject_option_missing"],
                 "cookie_wall_detected": snapshot["cookie_wall_detected"],
+                "banner_screenshot": snapshot["banner_screenshot"],
+                "text_boxes": snapshot["text_boxes"],
             }
             pages.append(initial_page)
 

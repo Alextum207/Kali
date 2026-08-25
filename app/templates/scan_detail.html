@@ -99,7 +99,12 @@
     </td>
     <td>{% if f.page_url %}<a href="{{ f.page_url }}" target="_blank">{{ f.page_url }}</a>{% else %}–{% endif %}</td>
     <td>{{ f.created_at }}</td>
-    <td>{% if f.screenshot_url %}<a href="{{ f.screenshot_url }}" target="_blank">ansehen</a>{% else %}–{% endif %}</td>
+    <td>
+      {% if f.screenshot_annotated_url %}<a href="{{ f.screenshot_annotated_url }}" target="_blank">markiert ansehen</a><br>{% endif %}
+      {% if f.screenshot_url %}<a href="{{ f.screenshot_url }}" target="_blank">ansehen</a>{% else %}–{% endif %}
+      {% if f.banner_screenshot_url %}<br><a href="{{ f.banner_screenshot_url }}" target="_blank">Cookie-Banner (vorher)</a>{% endif %}
+      {% if f.baseline_screenshot_url %}<br><a href="{{ f.baseline_screenshot_url }}" target="_blank">Preis davor</a>{% endif %}
+    </td>
     <td>
       {{ f.human_review or "ungeprüft" }}
       <form method="post" action="/scans/{{ scan.id }}/findings/{{ f.id }}/review" style="display:inline">

@@ -197,6 +197,40 @@ def test_generate_pdf_report_embeds_screenshot_as_data_uri(tmp_path, monkeypatch
     assert "screenshot_data_uri" not in findings[0]["evidence_data"]
 
 
+def test_generate_pdf_report_embeds_annotated_and_banner_screenshots(tmp_path, monkeypatch):
+    """Same embedding as screenshot_path, but for the two other evidence
+    screenshot keys a finding can carry (app/scan.py) — a quote-highlighted
+    screenshot and a pre-close cookie-banner screenshot."""
+    import base64
+
+    annotated_path = tmp_path / "annotated.png"
+    annotated_path.write_bytes(b"\x89PNG-annotated-bytes")
+    banner_path = tmp_path / "banner.png"
+    banner_path.write_bytes(b"\x89PNG-banner-bytes")
+
+    captured = {}
+
+    class _CapturingTemplate:
+        def render(self, **kwargs):
+            captured.update(kwargs)
+            return "<html></html>"
+
+    import app.reports as reports_module
+    monkeypatch.setattr(reports_module._env, "get_template", lambda name: _CapturingTemplate())
+
+    findings = [
+        {"pattern_type": "Forced Continuity", "target_norm": "§ 312j Abs. 3, 4 BGB; Art. 246a EGBGB",
+         "confidence_score": 0.85,
+         "evidence_data": {"screenshot_annotated_path": str(annotated_path), "banner_screenshot_path": str(banner_path)}},
+    ]
+    out_path = str(tmp_path / "report.pdf")
+    reports_module.generate_pdf_report("https://example.com", findings, out_path)
+
+    evidence = captured["findings"][0]["evidence_data"]
+    assert evidence["screenshot_annotated_data_uri"] == "data:image/png;base64," + base64.b64encode(b"\x89PNG-annotated-bytes").decode("ascii")
+    assert evidence["banner_screenshot_data_uri"] == "data:image/png;base64," + base64.b64encode(b"\x89PNG-banner-bytes").decode("ascii")
+
+
 def test_generate_pdf_report_skips_missing_screenshot_file_gracefully(tmp_path, monkeypatch):
     """A screenshot_path pointing at a file that no longer exists on disk
     must not crash report generation — best-effort, evidence data is more

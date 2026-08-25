@@ -19,20 +19,34 @@ with open(_LOGO_PATH, "rb") as _f:
     LOGO_DATA_URI = "data:image/png;base64," + base64.b64encode(_f.read()).decode("ascii")
 
 
+# Every screenshot-path evidence key (app/scan.py) that report.html embeds
+# inline as its own `<...>_data_uri` sibling key — screenshot_path always,
+# the other three only present on the finding types that produce them
+# (cookie-banner findings, quote-bearing findings, the checkout
+# price-increase finding).
+_SCREENSHOT_PATH_KEYS = (
+    "screenshot_path", "screenshot_annotated_path", "banner_screenshot_path", "baseline_screenshot_path",
+)
+
+
 def _embed_screenshot(finding: dict) -> dict:
-    """Returns a shallow copy of `finding` with evidence_data augmented by a
-    base64 `screenshot_data_uri`, read from evidence_data["screenshot_path"]
-    (the real file on disk saved by app/evidence.py) — so the PDF embeds
-    the actual evidence image inline instead of just printing its path/URL
-    as text. Never mutates the caller's finding/evidence_data dicts (the
-    same findings list is also used to render scan_detail.html). Best-effort:
-    a missing/unreadable file must never block the rest of the report."""
+    """Returns a shallow copy of `finding` with evidence_data augmented by
+    base64 `<...>_data_uri` keys, one per evidence key in
+    _SCREENSHOT_PATH_KEYS that's actually set on this finding — read from
+    the real file on disk saved by app/evidence.py, so the PDF embeds the
+    actual evidence image inline instead of just printing its path/URL as
+    text. Never mutates the caller's finding/evidence_data dicts (the same
+    findings list is also used to render scan_detail.html). Best-effort: a
+    missing/unreadable file must never block the rest of the report."""
     evidence = dict(finding.get("evidence_data") or {})
-    path = evidence.get("screenshot_path")
-    if path and os.path.isfile(path):
+    for path_key in _SCREENSHOT_PATH_KEYS:
+        path = evidence.get(path_key)
+        if not path or not os.path.isfile(path):
+            continue
         try:
             with open(path, "rb") as f:
-                evidence["screenshot_data_uri"] = "data:image/png;base64," + base64.b64encode(f.read()).decode("ascii")
+                data_uri = "data:image/png;base64," + base64.b64encode(f.read()).decode("ascii")
+            evidence[path_key.replace("_path", "_data_uri")] = data_uri
         except OSError:
             pass
     new_finding = dict(finding)
