@@ -419,9 +419,10 @@ async def test_verify_countdown_reset_boosts_confidence_when_timer_restarts():
         browser = await p.chromium.launch()
         page = await browser.new_page()
         await page.goto(COUNTDOWN_RESET_FIXTURE_URL)
-        await verify_countdown_reset(page, [finding], browser=browser)
+        result = await verify_countdown_reset(page, [finding], browser=browser)
         await browser.close()
 
+    assert result == [finding]  # confirmed reset -> kept
     assert finding["confidence_score"] > 0.7
     assert "clock_verified" in finding["evidence_data"]
 
@@ -432,11 +433,11 @@ COUNTDOWN_EXPIRES_FIXTURE_URL = pathlib.Path(__file__).parent.joinpath(
 
 
 @pytest.mark.asyncio
-async def test_verify_countdown_reset_leaves_confidence_unchanged_when_timer_expires():
+async def test_verify_countdown_reset_drops_finding_when_timer_expires_correctly():
     """A countdown that correctly shows "Abgelaufen" instead of restarting
-    must not get boosted — only a note is added, confidence stays as-is
-    (per the explicit no-auto-downgrade decision: false-negative risk in
-    the comparison heuristic shouldn't turn into a false all-clear)."""
+    isn't manipulative — it must not be reported as a Fake Urgency finding
+    at all (only confirmed resets get labeled, not every element that
+    merely matches a countdown-ish CSS class/id)."""
     finding = {
         "pattern_type": "Fake Urgency",
         "confidence_score": 0.7,
@@ -447,11 +448,10 @@ async def test_verify_countdown_reset_leaves_confidence_unchanged_when_timer_exp
         browser = await p.chromium.launch()
         page = await browser.new_page()
         await page.goto(COUNTDOWN_EXPIRES_FIXTURE_URL)
-        await verify_countdown_reset(page, [finding], browser=browser)
+        result = await verify_countdown_reset(page, [finding], browser=browser)
         await browser.close()
 
-    assert finding["confidence_score"] == 0.7
-    assert "clock_verified" in finding["evidence_data"]
+    assert result == []
 
 
 class _FakeClock:

@@ -2,7 +2,30 @@
 <body>
   <h1>Sneaker Modell X</h1>
   <p>Preis: 49,99 €</p>
-  <p class="countdown-timer">Nur noch 2 Stück auf Lager!</p>
+  <p>Nur noch 2 Stück auf Lager!</p>
+  <p class="countdown-timer">Angebot endet in: <span id="countdown-text">05:00</span></p>
+  <script>
+    // Dark pattern under test (same shape as tests/fixtures/countdown_reset_page.html):
+    // the countdown silently restarts a fresh 5-minute window instead of
+    // expiring — verify_countdown_reset's clock fast-forward must catch this.
+    let target = Date.now() + 5 * 60 * 1000;
+
+    function tick() {
+      let remaining = target - Date.now();
+      if (remaining <= 0) {
+        target = Date.now() + 5 * 60 * 1000;
+        remaining = target - Date.now();
+      }
+      const totalSeconds = Math.floor(remaining / 1000);
+      const minutes = Math.floor(totalSeconds / 60);
+      const seconds = totalSeconds % 60;
+      document.getElementById("countdown-text").textContent =
+        String(minutes).padStart(2, "0") + ":" + String(seconds).padStart(2, "0");
+    }
+
+    tick();
+    setInterval(tick, 1000);
+  </script>
   <button id="add-to-cart" onclick="window.location.href='cart.html'">In den Warenkorb</button>
   <a href="cart.html">Zum Warenkorb</a>
 </body>

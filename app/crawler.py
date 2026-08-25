@@ -400,7 +400,7 @@ async def _snapshot_page_impl(page, skip_diff_sleep: bool, consent_result: dict 
     # invalidate anything this function still needs).
     countdown_findings = find_countdown_elements(dom_after)
     try:
-        await verify_countdown_reset(page, countdown_findings, browser=browser)
+        countdown_findings = await verify_countdown_reset(page, countdown_findings, browser=browser)
     except Exception as exc:  # noqa: BLE001 - deliberate broad catch, page state can vary
         logger.debug("_snapshot_page: verify_countdown_reset failed: %s", exc)
 
@@ -484,7 +484,7 @@ async def _verify_cross_session_countdown(page, browser, selector: str, text_a: 
         )
 
 
-async def verify_countdown_reset(page, findings: list[dict], browser=None) -> None:
+async def verify_countdown_reset(page, findings: list[dict], browser=None) -> list[dict]:
     """Behavioral verification for Fake-Urgency countdown findings: jump
     the page's virtual clock forward and check whether the countdown text
     still shows a fresh value instead of expiring — the "Countdown startet
@@ -492,9 +492,18 @@ async def verify_countdown_reset(page, findings: list[dict], browser=None) -> No
     Clock API instead of really waiting. Also documents the resulting page
     change as a text diff, and (if `browser` is given) checks whether a
     brand-new, isolated session sees the same countdown value (see
-    _verify_cross_session_countdown). Mutates findings in place;
-    best-effort, never raises (a failed check just leaves the finding
-    as-is). No-op if there's nothing to verify.
+    _verify_cross_session_countdown).
+
+    Only a candidate confirmed to actually reset is a real finding — merely
+    matching a countdown-ish CSS class/id (find_countdown_elements) isn't
+    evidence of manipulation on its own (e.g. a real, correctly-expiring
+    sale timer, or a static "nur noch 2 auf Lager" element that happens to
+    carry a "countdown-timer" class). Returns a NEW list containing only
+    the confirmed-reset findings (plus any findings that weren't countdown
+    candidates in the first place, passed through unchanged) — the caller
+    must use the returned list, not the one passed in. best-effort, never
+    raises (an unverifiable candidate is dropped, same as a confirmed-legit
+    one — no reset proven, no finding reported).
     ponytail: only catches client-computed countdowns (JS Date/timers) —
     a countdown whose remaining value is re-fetched from the server on
     each load isn't fooled by a client-side clock mock. Real limitation,
@@ -505,9 +514,11 @@ async def verify_countdown_reset(page, findings: list[dict], browser=None) -> No
         for f in findings
         if f.get("pattern_type") == "Fake Urgency" and f.get("evidence_data", {}).get("selector")
     ]
+    other_findings = [f for f in findings if f not in countdown_findings]
     if not countdown_findings:
-        return
+        return findings
 
+    confirmed: list[dict] = []
     for finding in countdown_findings:
         selector = finding["evidence_data"]["selector"]
         try:
@@ -525,28 +536,27 @@ async def verify_countdown_reset(page, findings: list[dict], browser=None) -> No
             text_after = await locator.inner_text(timeout=2000)
             body_after = await page.inner_text("body")
         except Exception as exc:  # noqa: BLE001 - deliberate broad catch, page state can vary
-            logger.debug("verify_countdown_reset failed for %s: %s", selector, exc)
+            logger.debug("verify_countdown_reset: unverifiable, dropping %s: %s", selector, exc)
             continue
 
-        if _looks_reset(text_before, text_after):
-            finding["confidence_score"] = round(min(finding["confidence_score"] + 0.25, 1.0), 2)
-            finding["evidence_data"]["clock_verified"] = (
-                "Zeit künstlich vorgespult (+6h) — Countdown zeigt weiterhin einen "
-                "frischen Restwert statt abgelaufen zu sein."
-            )
-            # Cross-session corroboration only makes sense once the
-            # fast-forward check already flagged a reset — two sessions
-            # started milliseconds apart (no way to wait real hours during a
-            # live scan) would show near-identical remaining time for a
-            # genuine deadline too, so on its own this comparison can't
-            # discriminate real vs. fake; it only adds evidence once the
-            # timer is already suspected of resetting per-visitor.
-            if browser is not None:
-                await _verify_cross_session_countdown(page, browser, selector, text_before, finding)
-        else:
-            finding["evidence_data"]["clock_verified"] = (
-                "Zeit künstlich vorgespult (+6h) — kein Reset erkannt."
-            )
+        if not _looks_reset(text_before, text_after):
+            logger.debug("verify_countdown_reset: %s correctly expires, dropping", selector)
+            continue
+
+        finding["confidence_score"] = round(min(finding["confidence_score"] + 0.25, 1.0), 2)
+        finding["evidence_data"]["clock_verified"] = (
+            "Zeit künstlich vorgespult (+6h) — Countdown zeigt weiterhin einen "
+            "frischen Restwert statt abgelaufen zu sein."
+        )
+        # Cross-session corroboration only makes sense once the
+        # fast-forward check already flagged a reset — two sessions
+        # started milliseconds apart (no way to wait real hours during a
+        # live scan) would show near-identical remaining time for a
+        # genuine deadline too, so on its own this comparison can't
+        # discriminate real vs. fake; it only adds evidence once the
+        # timer is already suspected of resetting per-visitor.
+        if browser is not None:
+            await _verify_cross_session_countdown(page, browser, selector, text_before, finding)
 
         diff_lines = [
             line for line in difflib.unified_diff(
@@ -556,6 +566,10 @@ async def verify_countdown_reset(page, findings: list[dict], browser=None) -> No
         ]
         if diff_lines:
             finding["evidence_data"]["time_diff_sample"] = "\n".join(diff_lines[:10])
+
+        confirmed.append(finding)
+
+    return other_findings + confirmed
 
 
 _CAPTCHA_MARKERS = (
