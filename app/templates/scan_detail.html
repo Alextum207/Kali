@@ -14,6 +14,7 @@
   <a href="/">Neuen Scan starten</a></p>
 {% endif %}
 <a href="/scans/{{ scan.id }}/report.pdf">PDF-Report herunterladen</a>
+<a href="/scans/{{ scan.id }}/consumer">Verbraucher-Erklärung ansehen</a>
 <a href="mailto:{{ vz_email }}?subject={{ mailto_subject }}&body={{ mailto_body }}">Bei Verbraucherzentrale melden</a>
 
 {% if other_scans %}

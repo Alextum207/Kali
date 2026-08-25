@@ -136,6 +136,33 @@ EVIDENCE_HINTS: dict[str, str] = {
 }
 
 
+# Laienverständliche Erklärung pro Pattern-Typ für den Verbraucher-Report
+# (app/main.py::consumer_report) — bewusst ohne Norm-Zitate/Fachjargon,
+# im Gegensatz zu EVIDENCE_HINTS/NORM_MAP, die für die juristische Prüfung
+# gedacht sind. Deckt alle NORM_MAP-Typen ab.
+CONSUMER_DESCRIPTIONS: dict[str, str] = {
+    "Fake Urgency": "Ein Countdown oder eine Zeitangabe soll dich unter Druck setzen, schnell zu kaufen — oft ist die Frist gar nicht echt.",
+    "Fake Scarcity": "Ein Hinweis wie \"nur noch 2 auf Lager\" soll dich zur Eile drängen, obwohl der Bestand oft frei erfunden oder irreführend ist.",
+    "Fake Social Proof": "Angezeigte Nutzerzahlen oder Kaufhinweise (\"17 Personen sehen sich das gerade an\") sind möglicherweise nicht echt.",
+    "Sneaking / Hidden Costs": "Zusätzliche Kosten tauchen erst spät im Bestellprozess auf, nachdem du schon Zeit investiert hast.",
+    "Confirm Shaming": "Die Ablehnen-Option ist absichtlich so formuliert, dass du dich dafür schlecht fühlen oder schämen sollst (\"Nein, ich will nicht sparen\").",
+    "Visuelle Asymmetrie (Button)": "Der \"Zustimmen\"-Button ist auffällig größer/bunter gestaltet als der \"Ablehnen\"-Button, um dich zum Klicken zu lenken.",
+    "Pre-ticked Box": "Eine Checkbox für Zusatzoptionen oder Werbe-Einwilligung ist schon vorab angehakt — du musst aktiv abwählen statt zustimmen.",
+    "Trick Questions": "Eine Frage ist verwirrend oder doppelt verneint formuliert, sodass du versehentlich das Gegenteil von dem anklickst, was du willst.",
+    "Forced Continuity": "Ein Vertrag verlängert sich automatisch oder ist schwer zu kündigen, ohne dass das vorher klar kommuniziert wurde.",
+    "Decoy Pricing": "Eine der angebotenen Optionen ist bewusst unattraktiv gestaltet, nur damit eine andere (teurere) Option im Vergleich besser aussieht.",
+    "Nagging": "Du wirst wiederholt zu einer Handlung aufgefordert (z.B. Newsletter, App-Download), obwohl du schon abgelehnt hast.",
+    "Roach Motel": "Der Einstieg (z.B. Abo abschließen) ist einfach, der Ausstieg (kündigen) aber unnötig kompliziert gemacht.",
+    "Forced Path": "Du musst unnötige Zwischenschritte durchklicken, bevor du dein eigentliches Ziel erreichst.",
+    "Exploiting Addiction (Autoplay)": "Videos oder Inhalte starten automatisch, ohne dass du das ausgelöst hast — das soll dich länger auf der Seite halten.",
+    "Exploiting Addiction (Infinite Scroll)": "Die Seite lädt endlos neue Inhalte nach, ohne ein erkennbares Ende — das erschwert es, bewusst aufzuhören.",
+    "Verständnis-Barriere (Sprachkomplexität)": "Wichtige Informationen sind absichtlich in komplizierter Sprache oder Fachjargon versteckt.",
+    "Visuelle Tarnung (Kontrast)": "Wichtiger Text (z.B. rechtliche Hinweise) ist so blass oder klein gestaltet, dass er kaum auffällt.",
+    "Fehlende Reject-Option (Cookie-Banner)": "Der Cookie-Banner bietet keinen gleichwertigen \"Ablehnen\"-Button neben \"Akzeptieren\" an.",
+    "Cookie Wall": "Die Seite lässt sich ohne Zustimmung zu Cookies/Tracking gar nicht erst benutzen.",
+}
+
+
 # Endpoint verified via OpenAPI schema: legal-text-mcp-de HTTP API
 # (uvx legal-text-mcp-de http on http://0.0.0.0:8080)
 # Endpoint: /search (query param, not q; SearchResponse with results array)

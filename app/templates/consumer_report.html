@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Verbraucher-Erklärung – Kali{% endblock %}
+{% block content %}
+<h1>Was wurde auf {{ scan.url }} gefunden?</h1>
+<p class="hint">Diese Ansicht erklärt die gefundenen Muster in einfacher Sprache — ohne Rechtsjargon.
+  Für die juristische Einordnung siehe den <a href="/scans/{{ scan.id }}/report.pdf">vollständigen PDF-Report</a>.</p>
+
+{% if not findings %}
+<p>Keine auffälligen Muster auf dieser Seite gefunden.</p>
+{% else %}
+{% for f in findings %}
+<div class="card">
+  <h2>{{ f.pattern_type }}</h2>
+  <p>{{ descriptions.get(f.pattern_type, "Keine Beschreibung verfügbar.") }}</p>
+  {% if f.evidence_data.get("cross_session_match") %}<p class="hint">{{ f.evidence_data.get("cross_session_match") }}</p>{% endif %}
+  {% if f.page_url %}<p class="hint">Gefunden auf: <a href="{{ f.page_url }}" target="_blank">{{ f.page_url }}</a></p>{% endif %}
+  {% if f.screenshot_url %}<p><a href="{{ f.screenshot_url }}" target="_blank">Screenshot ansehen</a></p>{% endif %}
+</div>
+{% endfor %}
+{% endif %}
+{% endblock %}

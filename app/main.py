@@ -20,7 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from playwright.async_api import async_playwright
 
-from app.compliance import EVIDENCE_HINTS, aggregate_risk_score
+from app.compliance import CONSUMER_DESCRIPTIONS, EVIDENCE_HINTS, aggregate_risk_score
 from app.db import (
     init_db, get_scan, get_findings, get_pages, get_page_findings, list_scans,
     insert_scan, mark_scan_status, set_human_review, list_scans_by_url,
@@ -320,6 +320,19 @@ def scan_detail(
             "mailto_body": mailto_body,
             "other_scans": other_scans,
         },
+    )
+
+
+@app.get("/scans/{scan_id}/consumer", response_class=HTMLResponse)
+def consumer_report(request: Request, scan_id: int, conn: sqlite3.Connection = Depends(_get_conn)):
+    scan = get_scan(conn, scan_id)
+    if scan is None:
+        raise HTTPException(status_code=404, detail="Scan not found")
+    pages = get_pages(conn, scan_id)
+    findings = _attach_display_fields(get_findings(conn, scan_id), pages, scan["url"])
+    return templates.TemplateResponse(
+        request, "consumer_report.html",
+        {"scan": scan, "findings": findings, "descriptions": CONSUMER_DESCRIPTIONS},
     )
 
 

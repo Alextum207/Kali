@@ -609,3 +609,30 @@ def test_scan_detail_filter_form_with_blank_min_confidence_does_not_422(tmp_path
 
     assert response.status_code == 200
     assert "Confirm Shaming" in response.text
+
+
+def test_consumer_report_shows_plain_language_description(tmp_path, monkeypatch):
+    monkeypatch.setattr(main_module, "DB_PATH", str(tmp_path / "test.db"))
+
+    from app.db import init_db, insert_scan, insert_finding
+
+    conn = init_db(str(tmp_path / "test.db"))
+    scan_id = insert_scan(conn, "https://example.com")
+    insert_finding(conn, scan_id, {
+        "pattern_type": "Confirm Shaming", "target_norm": "Art. 25 DSA",
+        "confidence_score": 0.8, "evidence_data": {},
+    })
+
+    with TestClient(main_module.app) as client:
+        response = client.get(f"/scans/{scan_id}/consumer")
+
+    assert response.status_code == 200
+    assert "Art. 25 DSA" not in response.text
+    assert "schämen" in response.text
+
+
+def test_consumer_report_404_for_missing_scan(tmp_path, monkeypatch):
+    monkeypatch.setattr(main_module, "DB_PATH", str(tmp_path / "test.db"))
+    with TestClient(main_module.app) as client:
+        response = client.get("/scans/9999/consumer")
+    assert response.status_code == 404
