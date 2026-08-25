@@ -88,6 +88,43 @@ Scraper/Analyse-Engine/DB/Reporting; robuste Erkennung über berechnete visuelle
 Eigenschaften statt hartcodierter CSS-Klassen. Beides eingehalten (siehe
 Modul-Aufteilung oben).
 
+## Kategorie-Scoping der Fund-Erkennung
+Site-Crawl-Seiten werden in eine von 5 Kategorien eingeordnet
+(`classify_page_category`, `app/site_crawler.py::PAGE_CATEGORIES`) plus
+Fallback `other`. `run_analysis` (`app/analysis/pipeline.py`) sucht seit
+2026-08-25 pro Kategorie nur nach den dort inhaltlich plausiblen
+Pattern-Typen (`CATEGORY_ALLOWED_PATTERNS`, dort die Quelle der Wahrheit —
+dieser Abschnitt beschreibt nur das Warum) — reduziert False Positives wie
+"Fake Social Proof" auf einer Checkout-Seite. Gilt nur für den Site-Crawl
+(`app/scan.py::_analyze_page`), da dort allein die Kategorie eines Fundes
+bekannt ist; der Single-Page-Scan (`run_scan`) bleibt ungefiltert.
+
+- **Cookie- & Consent-Banner** (`cookie_consent`): Pre-ticked Box, Trick
+  Questions, Fehlende Reject-Option, Cookie Wall, Visuelle Asymmetrie
+  (Button) — die DSGVO-/Consent-typischen Muster.
+- **Checkout- & Bezahlprozesse** (`checkout_payment`): Decoy Pricing,
+  Hidden/Sneaking Costs, Fake Urgency/Scarcity, Confirm Shaming, Trick
+  Questions (z.B. gegenteilig formulierte Zusatzoptions-Checkboxen im
+  Checkout), Visuelle Asymmetrie, Sprachkomplexität, Kontrast-Tarnung —
+  alles, was Kaufdruck erzeugt oder Kosten/AGB verschleiert.
+- **Produktdetail- & Kategorieseiten** (`product_category`): Fake
+  Scarcity/Social Proof/Urgency, Decoy Pricing, Autoplay, Infinite Scroll —
+  Kaufanreiz- und Bindungs-Muster.
+- **Account-Verwaltung & Kündigungsstrecken** (`account_subscription`):
+  Roach Motel, Forced Continuity, Nagging, Confirm Shaming, Forced Path,
+  Sprachkomplexität, Kontrast-Tarnung — Muster rund um erschwerten Ausstieg.
+- **Pop-ups, Overlays & Lead-Formulare** (`popup_leadform`): Nagging, Trick
+  Questions, Pre-ticked Box, Confirm Shaming, Forced Path.
+- **other**: ungefiltert (kein Recall-Verlust auf nicht klassifizierbaren
+  Seiten).
+
+Zusätzlich hat `apply_consent_rules` (`app/crawler.py`) seit demselben Tag
+einen generischen text-basierten Fallback-Klick (Suche nach
+"ablehnen"/"reject"/… über alle sichtbaren Klick-Elemente), falls keine der
+206 vendorten Consent-O-Matic-Regeln (`data/consent_rules/`) den
+Banner der jeweiligen Seite matcht — vorher blieb der Banner in diesem Fall
+unbemerkt auf der Seite stehen und damit auch auf dem Beweis-Screenshot.
+
 ## Vorhandene Open-Source-Bausteine als Referenz
 Details in `Bestehende Dark-Pattern-Erkennungs-Projekte.md`. Kurzüberblick:
 - **Dapde Pattern-Highlighter** – clientseitig, zeitversetzter DOM-Vergleich (Countdowns, Scarcity);

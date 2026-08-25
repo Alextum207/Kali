@@ -41,7 +41,7 @@ async def test_run_scan_persists_findings_with_evidence(tmp_path, monkeypatch):
         assert har_dir == str(tmp_path)
         return _fake_crawl_result(har_dir)
 
-    async def fake_run_analysis(dom_html, button_styles, llm_client=None):
+    async def fake_run_analysis(dom_html, button_styles, llm_client=None, category=None):
         return [
             {
                 "pattern_type": "Pre-ticked Box",
@@ -90,7 +90,7 @@ async def test_run_scan_includes_contrast_and_reject_option_findings(tmp_path, m
         result["reject_option_missing"] = True
         return result
 
-    async def fake_run_analysis(dom_html, button_styles, llm_client=None):
+    async def fake_run_analysis(dom_html, button_styles, llm_client=None, category=None):
         return []
 
     async def fake_fetch_citation(norm, base_url, client=None):
@@ -122,7 +122,7 @@ async def test_run_scan_attaches_banner_screenshot_only_to_cookie_findings(tmp_p
         result["banner_screenshot"] = b"\x89PNG-fake-banner-bytes"
         return result
 
-    async def fake_run_analysis(dom_html, button_styles, llm_client=None):
+    async def fake_run_analysis(dom_html, button_styles, llm_client=None, category=None):
         return [
             {
                 "pattern_type": "Pre-ticked Box",
@@ -162,7 +162,7 @@ async def test_run_scan_attaches_annotated_screenshot_to_quote_bearing_finding(t
         ]
         return result
 
-    async def fake_run_analysis(dom_html, button_styles, llm_client=None):
+    async def fake_run_analysis(dom_html, button_styles, llm_client=None, category=None):
         return [
             {
                 "pattern_type": "Forced Continuity",
@@ -201,7 +201,7 @@ async def test_run_scan_citation_none_does_not_crash(tmp_path, monkeypatch):
     async def fake_crawl_page(url, browser, har_dir=None):
         return _fake_crawl_result(har_dir)
 
-    async def fake_run_analysis(dom_html, button_styles, llm_client=None):
+    async def fake_run_analysis(dom_html, button_styles, llm_client=None, category=None):
         return [
             {
                 "pattern_type": "Pre-ticked Box",
@@ -239,7 +239,7 @@ async def test_run_scan_does_not_block_on_slow_rfc3161(tmp_path, monkeypatch):
     async def fake_crawl_page(url, browser, har_dir=None):
         return _fake_crawl_result(har_dir)
 
-    async def fake_run_analysis(dom_html, button_styles, llm_client=None):
+    async def fake_run_analysis(dom_html, button_styles, llm_client=None, category=None):
         return []
 
     monkeypatch.setattr("app.scan.crawl_page", fake_crawl_page)
@@ -301,7 +301,7 @@ async def test_run_site_scan_persists_pages_and_page_scoped_findings(tmp_path, m
 
     call_count = {"n": 0}
 
-    async def fake_run_analysis(dom_html, button_styles, llm_client=None, page=None):
+    async def fake_run_analysis(dom_html, button_styles, llm_client=None, page=None, category=None):
         call_count["n"] += 1
         if "checkbox" in dom_html:
             return [
@@ -355,7 +355,7 @@ async def test_run_site_scan_tolerates_missing_har_file(tmp_path, monkeypatch):
     async def fake_crawl_site(start_url, browser, max_pages, har_dir, llm_client=None):
         return fake_result
 
-    async def fake_run_analysis(dom_html, button_styles, llm_client=None, page=None):
+    async def fake_run_analysis(dom_html, button_styles, llm_client=None, page=None, category=None):
         return []
 
     monkeypatch.setattr("app.scan.crawl_site", fake_crawl_site)
@@ -400,7 +400,7 @@ async def test_run_site_scan_caches_citation_fetch_per_norm(tmp_path, monkeypatc
     async def fake_crawl_site(start_url, browser, max_pages, har_dir, llm_client=None):
         return site_result
 
-    async def fake_run_analysis(dom_html, button_styles, llm_client=None, page=None):
+    async def fake_run_analysis(dom_html, button_styles, llm_client=None, page=None, category=None):
         return [
             {
                 "pattern_type": "Pre-ticked Box",
@@ -455,7 +455,7 @@ async def test_run_site_scan_respects_analysis_concurrency_limit(tmp_path, monke
 
     in_flight = {"current": 0, "max_seen": 0}
 
-    async def fake_run_analysis(dom_html, button_styles, llm_client=None, page=None):
+    async def fake_run_analysis(dom_html, button_styles, llm_client=None, page=None, category=None):
         in_flight["current"] += 1
         in_flight["max_seen"] = max(in_flight["max_seen"], in_flight["current"])
         await asyncio.sleep(0.05)  # hold the slot long enough for overlap to be observable
@@ -505,7 +505,7 @@ async def test_run_site_scan_sets_impact_for_contrast_and_infinite_scroll_findin
     async def fake_crawl_site(start_url, browser, max_pages, har_dir, llm_client=None):
         return site_result
 
-    async def fake_run_analysis(dom_html, button_styles, llm_client=None, page=None):
+    async def fake_run_analysis(dom_html, button_styles, llm_client=None, page=None, category=None):
         return []
 
     monkeypatch.setattr("app.scan.crawl_site", fake_crawl_site)
@@ -557,7 +557,7 @@ async def test_run_site_scan_detects_checkout_price_increase_across_flow_steps(t
     async def fake_crawl_site(start_url, browser, max_pages, har_dir, llm_client=None):
         return site_result
 
-    async def fake_run_analysis(dom_html, button_styles, llm_client=None, page=None):
+    async def fake_run_analysis(dom_html, button_styles, llm_client=None, page=None, category=None):
         return []
 
     monkeypatch.setattr("app.scan.crawl_site", fake_crawl_site)
@@ -609,7 +609,7 @@ async def test_run_site_scan_survives_price_increase_detection_failure(tmp_path,
     async def fake_crawl_site(start_url, browser, max_pages, har_dir, llm_client=None):
         return site_result
 
-    async def fake_run_analysis(dom_html, button_styles, llm_client=None, page=None):
+    async def fake_run_analysis(dom_html, button_styles, llm_client=None, page=None, category=None):
         return [
             {
                 "pattern_type": "Pre-ticked Box",

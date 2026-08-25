@@ -33,9 +33,10 @@ function escapeHtml(str) {
 
     // Same full-tab screenshot (not cropped to the element) for every row —
     // shows the whole page context a finding was detected on, not just the
-    // matched element in isolation.
+    // matched element in isolation. Only opened (in a new tab) on click,
+    // not inlined into the table.
     const thumbCell = reportData.screenshot
-        ? `<img src="${reportData.screenshot}" alt="Screenshot der Seite" style="max-width:320px;border:1px solid #D8D5CA;border-radius:4px;">`
+        ? `<a href="${reportData.screenshot}" target="_blank" rel="noopener">Screenshot</a>`
         : "–";
 
     // Full URL (with path/query string), not just the domain — every row
@@ -49,7 +50,7 @@ function escapeHtml(str) {
         const row = document.createElement("tr");
         row.innerHTML = `
             <td>${escapeHtml(item.pattern_type)}</td>
-            <td>Möglicherweise rechtlich relevant — juristische Prüfung erforderlich</td>
+            <td>${escapeHtml(item.norm)}</td>
             <td>${escapeHtml(item.impact)}</td>
             <td>${escapeHtml(item.quote)}</td>
             <td>${item.count}</td>
@@ -59,6 +60,11 @@ function escapeHtml(str) {
         table.appendChild(row);
     }
     content.appendChild(table);
+
+    const disclaimer = document.createElement("p");
+    disclaimer.className = "disclaimer";
+    disclaimer.textContent = "Möglicherweise rechtlich relevant — juristische Prüfung erforderlich";
+    content.appendChild(disclaimer);
 })();
 
 document.getElementById("print-btn").addEventListener("click", () => window.print());

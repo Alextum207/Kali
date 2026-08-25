@@ -360,6 +360,33 @@ async def apply_consent_rules(page, rules_dir: str = DEFAULT_CONSENT_RULES_DIR) 
             if not found_reject_candidate and not _has_consent_toggle(data):
                 result["reject_option_missing"] = True
 
+        if not clicked_reject:
+            # No vendored rule matched this site's banner at all (or matched
+            # but had no reject target) — the common case for custom/self-
+            # hosted CMPs not in the 206-file vendor set, and previously
+            # meant the banner silently stayed on the page (and in every
+            # evidence screenshot) with no error. Generic fallback: click
+            # the first visible element whose text looks like a reject
+            # action, page-wide. ponytail: text-matching only, misses
+            # icon-only reject buttons with no text — add a rule file for a
+            # specific site if this still doesn't catch it.
+            try:
+                for el in await page.locator("button, a, [role=button], input[type=button], input[type=submit]").all():
+                    try:
+                        text = ((await el.inner_text(timeout=500)) or (await el.get_attribute("value") or "")).lower()
+                    except Exception:
+                        continue
+                    if not any(kw in text for kw in _REJECT_KEYWORDS):
+                        continue
+                    if not await el.is_visible():
+                        continue
+                    await el.click(timeout=1000)
+                    clicked_reject = True
+                    logger.info("apply_consent_rules: clicked generic fallback reject %r", text.strip()[:50])
+                    break
+            except Exception as exc:  # noqa: BLE001 - deliberate broad catch, page state can vary
+                logger.debug("apply_consent_rules: generic fallback click failed: %s", exc)
+
         return result
     except Exception as exc:  # pragma: no cover - defensive catch-all
         logger.warning("apply_consent_rules: best-effort pass failed: %s", exc)

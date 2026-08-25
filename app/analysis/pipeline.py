@@ -48,9 +48,57 @@ IMPACT_MAP = {
     "Cookie Wall": "Verbraucher kann Inhalt nicht ohne Einwilligung nutzen",
 }
 
+# Welche Pattern-Typen auf einer Seite dieser Kategorie überhaupt plausibel
+# vorkommen können — reduziert False Positives, die entstehen, wenn z.B. ein
+# Checkout-Text zufällig wie Fake Social Proof klingt. Dokumentiert (mit
+# Begründung je Kategorie) in CLAUDE.md, Abschnitt "Kategorie-Scoping der
+# Fund-Erkennung"; dort ist dieser Dict die Quelle der Wahrheit, die Doku
+# verweist nur darauf. Kategorie ohne Eintrag hier (z.B. "other") bleibt
+# ungefiltert. Nur beim Site-Crawl anwendbar (dort ist die Kategorie
+# bekannt) — der Single-Page-Scan hat kein Kategorie-Signal und bleibt
+# ungefiltert.
+CATEGORY_ALLOWED_PATTERNS: dict[str, set[str]] = {
+    "cookie_consent": {
+        "Pre-ticked Box", "Trick Questions",
+        "Fehlende Reject-Option (Cookie-Banner)", "Cookie Wall",
+        "Visuelle Asymmetrie (Button)",
+    },
+    "checkout_payment": {
+        "Decoy Pricing", "Hidden Costs", "Sneaking / Hidden Costs",
+        "Fake Urgency", "Fake Scarcity", "Confirm Shaming", "Trick Questions",
+        "Visuelle Asymmetrie (Button)",
+        "Verständnis-Barriere (Sprachkomplexität)", "Visuelle Tarnung (Kontrast)",
+    },
+    "account_subscription": {
+        "Roach Motel", "Forced Continuity", "Nagging", "Confirm Shaming",
+        "Forced Path", "Verständnis-Barriere (Sprachkomplexität)",
+        "Visuelle Tarnung (Kontrast)",
+    },
+    "product_category": {
+        "Fake Scarcity", "Fake Social Proof", "Fake Urgency", "Decoy Pricing",
+        "Exploiting Addiction (Autoplay)", "Exploiting Addiction (Infinite Scroll)",
+    },
+    "popup_leadform": {
+        "Nagging", "Trick Questions", "Pre-ticked Box", "Confirm Shaming",
+        "Forced Path",
+    },
+}
+
+
+def filter_by_category(findings: list[dict], category: str | None) -> list[dict]:
+    """Drops findings whose pattern_type isn't plausible for `category`
+    (see CATEGORY_ALLOWED_PATTERNS). No entry for `category` (e.g. "other",
+    or None) means unfiltered — safest default for pages that couldn't be
+    classified."""
+    allowed = CATEGORY_ALLOWED_PATTERNS.get(category or "")
+    if allowed is None:
+        return findings
+    return [f for f in findings if f["pattern_type"] in allowed]
+
 
 async def run_analysis(
-    dom_html: str, button_styles: dict | None, llm_client=None, page=None
+    dom_html: str, button_styles: dict | None, llm_client=None, page=None,
+    category: str | None = None,
 ) -> list[dict]:
     findings: list[dict] = []
 
@@ -101,4 +149,4 @@ async def run_analysis(
         f["target_norm"] = map_to_norm(f["pattern_type"])
         f["evidence_data"]["impact"] = IMPACT_MAP.get(f["pattern_type"], "–")
 
-    return findings
+    return filter_by_category(findings, category)

@@ -7,7 +7,7 @@ import httpx
 from app.crawler import crawl_page
 from app.site_crawler import crawl_site, CHECKOUT_PAYMENT_CATEGORY
 from app.analysis.heuristics import find_price_increase_in_flow
-from app.analysis.pipeline import run_analysis, IMPACT_MAP
+from app.analysis.pipeline import run_analysis, filter_by_category, IMPACT_MAP
 from app.analysis.screenshot_annotate import highlight_quote_in_screenshot
 from app.evidence import save_evidence, sha256_bytes, rfc3161_timestamp
 from app.compliance import fetch_citation, map_to_norm
@@ -253,11 +253,16 @@ async def _analyze_page(
 
         saved_banner_path, banner_hash = await _save_banner_screenshot(page_data, banner_screenshot_path)
 
+        category = page_data.get("category")
         findings = await run_analysis(
-            page_data["dom_after"], page_data["button_styles"], llm_client=llm_client
+            page_data["dom_after"], page_data["button_styles"], llm_client=llm_client,
+            category=category,
         )
 
-        findings.extend(_crawl_time_findings(page_data))
+        # _crawl_time_findings runs outside run_analysis (needs live
+        # crawl-time state), so it needs the same category filter applied
+        # separately to stay consistent.
+        findings.extend(filter_by_category(_crawl_time_findings(page_data), category))
 
         for i, finding in enumerate(findings):
             finding["evidence_data"]["screenshot_path"] = screenshot_path
