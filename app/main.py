@@ -72,6 +72,11 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[os.environ.get("FRONTEND_ORIGIN", "http://localhost:8080")],
     allow_methods=["GET", "POST"],
+    # api_start_scan sends a JSON body (Content-Type: application/json),
+    # which isn't a CORS-safelisted header — without allow_headers the
+    # preflight OPTIONS request itself gets rejected with 400 before the
+    # POST ever runs (fetch() then throws "Failed to fetch").
+    allow_headers=["Content-Type"],
 )
 
 templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "templates"))

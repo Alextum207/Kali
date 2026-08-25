@@ -25,13 +25,20 @@ export interface Page {
   crawled_at: string;
 }
 
+export interface Risk {
+  // app/compliance.py::aggregate_risk_score — score is 0.0-1.0, not /10.
+  score: number;
+  level: "niedrig" | "mittel" | "hoch";
+  by_category: Record<string, number>;
+}
+
 export interface Scan {
   id: number;
   url: string;
   status: "running" | "done" | "error";
   started_at: string;
   finished_at: string | null;
-  risk: number;
+  risk: Risk;
 }
 
 async function getJSON<T>(path: string): Promise<T> {

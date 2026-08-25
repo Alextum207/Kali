@@ -162,10 +162,14 @@ const CaseAnalysis = () => {
                   />
                   <div>
                     <span className="inline-block text-xs font-semibold px-3 py-1 rounded-full bg-destructive/10 text-destructive mb-2">
-                      {scan.risk >= 7 ? "High priority" : scan.risk >= 4 ? "Medium priority" : "Low priority"}
+                      {scan.risk.level === "hoch"
+                        ? "High priority"
+                        : scan.risk.level === "mittel"
+                        ? "Medium priority"
+                        : "Low priority"}
                     </span>
                     <p className="text-4xl font-bold leading-none">
-                      {scan.risk.toFixed(1)} <span className="text-base font-medium text-foreground/50">/10</span>
+                      {(scan.risk.score * 10).toFixed(1)} <span className="text-base font-medium text-foreground/50">/10</span>
                     </p>
                   </div>
                 </div>
