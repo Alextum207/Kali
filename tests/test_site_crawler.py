@@ -317,6 +317,54 @@ TWO_PAGE_SITE_URL = pathlib.Path(__file__).parent.joinpath(
 
 
 @pytest.mark.asyncio
+async def test_crawl_site_raises_when_robots_txt_disallows_start_url(tmp_path, monkeypatch):
+    from urllib.robotparser import RobotFileParser
+    from app.robots import RobotsDisallowedError
+
+    async def fake_fetch_robots_parser(base_url, client):
+        parser = RobotFileParser()
+        parser.parse(["User-agent: *", "Disallow: /"])
+        return parser
+
+    monkeypatch.setattr("app.site_crawler.fetch_robots_parser", fake_fetch_robots_parser)
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        try:
+            with pytest.raises(RobotsDisallowedError) as exc_info:
+                await crawl_site(TWO_PAGE_SITE_URL, browser, max_pages=5, har_dir=str(tmp_path))
+        finally:
+            await browser.close()
+
+    assert exc_info.value.url == TWO_PAGE_SITE_URL
+
+
+@pytest.mark.asyncio
+async def test_crawl_site_skips_robots_disallowed_discovered_links(tmp_path, monkeypatch):
+    from urllib.robotparser import RobotFileParser
+
+    def fake_discover_links(dom_html, base_url, allowed_hosts):
+        return [TWO_PAGE_SITE_URL.replace("index.html", "page2.html")]
+
+    async def fake_fetch_robots_parser(base_url, client):
+        parser = RobotFileParser()
+        parser.parse(["User-agent: *", "Disallow: /page2.html"])
+        return parser
+
+    monkeypatch.setattr("app.site_crawler.discover_links", fake_discover_links)
+    monkeypatch.setattr("app.site_crawler.fetch_robots_parser", fake_fetch_robots_parser)
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        result = await crawl_site(TWO_PAGE_SITE_URL, browser, max_pages=5, har_dir=str(tmp_path))
+        await browser.close()
+
+    urls = {p["url"] for p in result["pages"]}
+    assert not any("page2.html" in u for u in urls)
+    assert len(result["pages"]) == 1  # only the start page
+
+
+@pytest.mark.asyncio
 async def test_crawl_site_follows_same_directory_links_up_to_max_pages(tmp_path):
     async with async_playwright() as p:
         browser = await p.chromium.launch()
@@ -332,6 +380,40 @@ async def test_crawl_site_follows_same_directory_links_up_to_max_pages(tmp_path)
     assert len(result["pages"]) <= 5
     assert result["har_path"].endswith(".har")
     assert all("category" in p for p in result["pages"])
+
+
+@pytest.mark.asyncio
+async def test_crawl_site_bounds_a_hanging_context_close(tmp_path, monkeypatch):
+    # Root cause of a real-world crawl hang confirmed against a live site
+    # (amazon.de): BrowserContext.close() with record_har_path set can
+    # itself hang (HAR flush never completing) — this is the crawl's very
+    # last await, in a bare `finally: await context.close()` with no bound,
+    # so a hang there means crawl_site (and the whole scan) never returns,
+    # even though every page was already crawled successfully.
+    import asyncio
+    from playwright.async_api import BrowserContext
+
+    original_close = BrowserContext.close
+
+    async def hanging_close(self, *args, **kwargs):
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(BrowserContext, "close", hanging_close)
+    monkeypatch.setattr("app.site_crawler.CONTEXT_CLOSE_TIMEOUT_SECONDS", 0.5)
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        result = await asyncio.wait_for(
+            crawl_site(
+                TWO_PAGE_SITE_URL, browser, max_pages=1, har_dir=str(tmp_path),
+                url_validator=lambda url: None,
+            ),
+            timeout=5,
+        )
+        monkeypatch.setattr(BrowserContext, "close", original_close)
+        await browser.close()
+
+    assert len(result["pages"]) == 1  # the crawl itself still succeeded
 
 
 @pytest.mark.asyncio

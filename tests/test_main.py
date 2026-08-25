@@ -164,6 +164,46 @@ def test_scan_report_falls_back_to_html_when_pdf_generation_fails(tmp_path, monk
     assert "Confirm Shaming" in response.text
 
 
+def test_start_scan_normalizes_missing_scheme(tmp_path, monkeypatch):
+    # Root cause of "Scan starten hängt": the dashboard's <input type="url">
+    # requires an absolute URL client-side, so a bare domain (no scheme)
+    # never even reaches the server via a real browser — silent no-op that
+    # looks like a hang. Backend now normalizes as a safety net (dashboard
+    # form input type was relaxed too, see dashboard.html).
+    monkeypatch.setattr(main_module, "DB_PATH", str(tmp_path / "test.db"))
+    monkeypatch.setattr(main_module, "EVIDENCE_DIR", str(tmp_path / "evidence"))
+
+    async def fake_run_site_scan(url, conn, evidence_dir, browser=None, max_pages=None, llm_client=None, scan_id=None):
+        return scan_id
+
+    monkeypatch.setattr(main_module, "run_site_scan", fake_run_site_scan)
+
+    with TestClient(main_module.app) as client:
+        response = client.post("/scans", data={"url": "example.com"}, follow_redirects=False)
+
+    assert response.status_code == 303
+
+
+def test_start_scan_normalizes_bare_host_with_port(tmp_path, monkeypatch):
+    # urlsplit("localhost:8000").scheme == "localhost" (RFC 3986 grammar
+    # doesn't require "//" for a scheme) — a naive `not scheme` check would
+    # treat this as already-schemed and skip normalization, so a bare
+    # "host:port" input would hit validate_scan_url's scheme-rejected error
+    # instead of being normalized to https://.
+    monkeypatch.setattr(main_module, "DB_PATH", str(tmp_path / "test.db"))
+    monkeypatch.setattr(main_module, "EVIDENCE_DIR", str(tmp_path / "evidence"))
+
+    async def fake_run_site_scan(url, conn, evidence_dir, browser=None, max_pages=None, llm_client=None, scan_id=None):
+        return scan_id
+
+    monkeypatch.setattr(main_module, "run_site_scan", fake_run_site_scan)
+
+    with TestClient(main_module.app) as client:
+        response = client.post("/scans", data={"url": "example.com:8080"}, follow_redirects=False)
+
+    assert response.status_code == 303
+
+
 def test_start_scan_rejects_unsafe_url(tmp_path, monkeypatch):
     monkeypatch.setattr(main_module, "DB_PATH", str(tmp_path / "test.db"))
     with TestClient(main_module.app) as client:
@@ -195,6 +235,32 @@ def test_start_scan_marks_status_error_when_captcha_required(tmp_path, monkeypat
 
     conn = init_db(db_path)
     assert get_scan(conn, scan_id)["status"] == "error"
+
+
+def test_start_scan_marks_status_error_with_message_when_robots_txt_disallows(tmp_path, monkeypatch):
+    from app.robots import RobotsDisallowedError
+    from app.db import init_db, get_scan
+
+    db_path = str(tmp_path / "test.db")
+    monkeypatch.setattr(main_module, "DB_PATH", db_path)
+    monkeypatch.setattr(main_module, "EVIDENCE_DIR", str(tmp_path / "evidence"))
+
+    async def fake_run_site_scan(*args, **kwargs):
+        raise RobotsDisallowedError("https://example.com")
+
+    monkeypatch.setattr(main_module, "run_site_scan", fake_run_site_scan)
+
+    with TestClient(main_module.app) as client:
+        response = client.post("/scans", data={"url": "https://example.com"}, follow_redirects=False)
+        scan_id = int(response.headers["location"].rsplit("/", 1)[-1])
+
+        detail = client.get(f"/scans/{scan_id}")
+
+    conn = init_db(db_path)
+    scan = get_scan(conn, scan_id)
+    assert scan["status"] == "error"
+    assert "robots.txt" in scan["error_message"]
+    assert "robots.txt" in detail.text
 
 
 def test_page_detail_shows_findings_for_one_page(tmp_path, monkeypatch):

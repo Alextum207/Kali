@@ -25,6 +25,7 @@ from app.db import (
     init_db, get_scan, get_findings, get_pages, get_page_findings, list_scans,
     insert_scan, mark_scan_status, set_human_review, list_scans_by_url,
 )
+from app.robots import RobotsDisallowedError
 from app.scan import run_site_scan
 from app.url_safety import validate_scan_url
 
@@ -175,6 +176,14 @@ async def _run_scan_background(scan_id: int, url: str, max_pages: int | None, br
             llm_client=_LLM_CLIENT,
             scan_id=scan_id,
         )
+    except RobotsDisallowedError as exc:
+        mark_scan_status(
+            bg_conn, scan_id, "error",
+            message=(
+                f"robots.txt von {exc.url} verbietet automatisiertes Durchsuchen "
+                "(Disallow) — Scan sofort abgebrochen, keine Seite wurde besucht."
+            ),
+        )
     except Exception:
         mark_scan_status(bg_conn, scan_id, "error")
     finally:
@@ -189,6 +198,20 @@ async def start_scan(
     max_pages: int | None = Form(None),
     conn: sqlite3.Connection = Depends(_get_conn),
 ):
+    url = url.strip()
+    if url and urllib.parse.urlsplit(url).scheme not in ("http", "https"):
+        # Root cause of "Scan starten hängt": the dashboard's URL field used
+        # to be <input type="url">, which the browser silently refuses to
+        # submit without a scheme (e.g. "example.com") — no error, just
+        # nothing happens. Field is now plain text; normalize here so a
+        # bare host works. Checking "scheme not in {http,https}" rather than
+        # "not scheme": urlsplit("localhost:8000").scheme == "localhost" per
+        # RFC 3986 grammar (no "//" required for a scheme), so a bare
+        # "host:port" input would otherwise slip past a falsy-scheme check
+        # unnormalized and hit validate_scan_url's confusing scheme-rejected
+        # error instead of being treated as a host to prepend https:// to.
+        # bare domain still works instead of failing validate_scan_url.
+        url = f"https://{url}"
     try:
         validate_scan_url(url)
     except ValueError as exc:

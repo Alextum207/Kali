@@ -56,6 +56,16 @@ def _ensure_human_review_column(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE findings ADD COLUMN human_review TEXT")
 
 
+def _ensure_error_message_column(conn: sqlite3.Connection) -> None:
+    """Same idempotency guard as _ensure_page_id_column, for DBs created
+    before error_message existed. Set on status='error' to tell the user
+    *why* a scan failed (e.g. robots.txt disallow) instead of a generic
+    message."""
+    cols = [row[1] for row in conn.execute("PRAGMA table_info(scans)")]
+    if "error_message" not in cols:
+        conn.execute("ALTER TABLE scans ADD COLUMN error_message TEXT")
+
+
 def init_db(path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
@@ -63,6 +73,7 @@ def init_db(path: str) -> sqlite3.Connection:
     _ensure_page_id_column(conn)
     _ensure_scan_status_columns(conn)
     _ensure_human_review_column(conn)
+    _ensure_error_message_column(conn)
     conn.commit()
     return conn
 
@@ -73,10 +84,10 @@ def insert_scan(conn: sqlite3.Connection, url: str) -> int:
     return cur.lastrowid
 
 
-def mark_scan_status(conn: sqlite3.Connection, scan_id: int, status: str) -> None:
+def mark_scan_status(conn: sqlite3.Connection, scan_id: int, status: str, message: str | None = None) -> None:
     conn.execute(
-        "UPDATE scans SET status = ?, finished_at = datetime('now') WHERE id = ?",
-        (status, scan_id),
+        "UPDATE scans SET status = ?, finished_at = datetime('now'), error_message = ? WHERE id = ?",
+        (status, message, scan_id),
     )
     conn.commit()
 

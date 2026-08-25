@@ -10,7 +10,7 @@
 {% if scan.status == "running" %}
 <p class="badge badge-mittel">Scan läuft… (aktualisiert automatisch alle 5s)</p>
 {% elif scan.status == "error" %}
-<p class="badge badge-hoch">Scan fehlgeschlagen — evtl. Captcha oder Netzwerkfehler, siehe Server-Log.
+<p class="badge badge-hoch">Scan fehlgeschlagen{% if scan.error_message %}: {{ scan.error_message }}{% else %} — evtl. Captcha oder Netzwerkfehler, siehe Server-Log.{% endif %}
   <a href="/">Neuen Scan starten</a></p>
 {% endif %}
 <a href="/scans/{{ scan.id }}/report.pdf">PDF-Report herunterladen</a>

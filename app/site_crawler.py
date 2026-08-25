@@ -18,7 +18,10 @@ from app.crawler import (
     _snapshot_page,
     apply_consent_rules,
 )
+import httpx
+
 from app.llm_utils import extract_text
+from app.robots import USER_AGENT, RobotsDisallowedError, fetch_robots_parser
 from app.url_safety import validate_scan_url
 
 logger = logging.getLogger(__name__)
@@ -72,6 +75,15 @@ TARGET_CATEGORIES = ("checkout_payment", "account_subscription", "product_catego
 # Safety cap on decide_next_interaction/click loops within one category flow
 # (e.g. multi-step checkout) — a ceiling against dead-loop pages, not a goal.
 MAX_FLOW_STEPS = int(os.environ.get("MAX_FLOW_STEPS", "3"))
+
+# context.close() (which flushes the HAR file) can itself hang on a real,
+# heavy site — confirmed against amazon.de: after several pages generating
+# a lot of recorded network traffic, the finally-block close() never
+# returned. It's the crawl's very last await with no bound of its own, so a
+# hang there means the whole scan hangs forever even though every page was
+# already crawled successfully. Bounding it here means we lose (at worst) an
+# incomplete HAR on a pathological site instead of hanging the scan.
+CONTEXT_CLOSE_TIMEOUT_SECONDS = int(os.environ.get("CONTEXT_CLOSE_TIMEOUT_SECONDS", "30"))
 
 # Cache for classify_page_category's LLM fallback ONLY — a routing decision
 # (which queue bucket a URL belongs to), never for dark-pattern findings.
@@ -297,12 +309,19 @@ async def _walk_category_flow(
             # tune with real timing data if flows still misfire or this
             # proves wastefully long.
             await asyncio.sleep(0.5)
+            navigated = page.url != before_url
+            # A real click can navigate into a state _snapshot_page can't
+            # read back cleanly (login/bot wall, stalled AJAX) — its own
+            # SNAPSHOT_TIMEOUT_SECONDS bounds that, and this try/except
+            # treats a timeout the same as any other broken flow step:
+            # stop the flow, keep the last good snapshot, don't fail the
+            # whole crawl over one live-site interaction going sideways.
+            new_snapshot = await _snapshot_page(page, skip_diff_sleep=navigated)
         except Exception as exc:  # noqa: BLE001 - deliberate broad catch, page state can vary
             logger.debug("crawl_site: flow interaction click failed: %s", exc)
             break
 
-        navigated = page.url != before_url
-        snapshot = await _snapshot_page(page, skip_diff_sleep=navigated)
+        snapshot = new_snapshot
         new_category = await classify_page_category(page.url, snapshot["dom_after"], llm_client=llm_client)
 
         if navigated:
@@ -359,6 +378,12 @@ async def crawl_site(
     har_path = str(pathlib.Path(har_dir) / f"site-crawl-{uuid.uuid4().hex}.har")
     context = await browser.new_context(record_har_path=har_path)
 
+    async with httpx.AsyncClient() as robots_client:
+        robots_parser = await fetch_robots_parser(start_url, robots_client)
+    if not robots_parser.can_fetch(USER_AGENT, start_url):
+        await context.close()
+        raise RobotsDisallowedError(start_url)
+
     start_host = urlparse(start_url).hostname or ""
     allowed_hosts = {start_host}
 
@@ -388,13 +413,16 @@ async def crawl_site(
             page = await context.new_page()
             try:
                 await page.goto(url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
+                consent_result = await apply_consent_rules(page, consent_rules_dir)
+                # _snapshot_page's own SNAPSHOT_TIMEOUT_SECONDS bounds a page
+                # stuck mid-navigation (login/bot wall, stalled AJAX) —
+                # caught here like any other broken-page load, so one bad
+                # URL is skipped instead of aborting the whole site scan.
+                snapshot = await _snapshot_page(page, consent_result=consent_result)
             except Exception as exc:  # noqa: BLE001 - deliberate broad catch, a dead link shouldn't kill the crawl
                 logger.warning("crawl_site: failed to load %r: %s", url, exc)
                 await page.close()
                 continue
-
-            consent_result = await apply_consent_rules(page, consent_rules_dir)
-            snapshot = await _snapshot_page(page, consent_result=consent_result)
 
             if url == start_url and _looks_like_captcha(snapshot["dom_after"]):
                 await page.close()
@@ -452,6 +480,9 @@ async def crawl_site(
                 except ValueError as exc:
                     logger.info("crawl_site: skipping unsafe discovered link %r: %s", link, exc)
                     continue
+                if not robots_parser.can_fetch(USER_AGENT, link):
+                    logger.info("crawl_site: skipping robots.txt-disallowed link %r", link)
+                    continue
                 predicted = _predict_category_from_url(link)
                 if predicted in TARGET_CATEGORIES:
                     # Always keep following target-category links, even if
@@ -467,6 +498,11 @@ async def crawl_site(
 
             await page.close()
     finally:
-        await context.close()  # flushes the HAR file to disk
+        try:
+            # Flushes the HAR file to disk — see CONTEXT_CLOSE_TIMEOUT_SECONDS
+            # docstring above for why this needs a bound.
+            await asyncio.wait_for(context.close(), timeout=CONTEXT_CLOSE_TIMEOUT_SECONDS)
+        except Exception as exc:  # noqa: BLE001 - deliberate broad catch, best-effort HAR flush
+            logger.warning("crawl_site: context.close() timed out or failed (HAR may be incomplete): %s", exc)
 
     return {"pages": pages, "har_path": har_path}

@@ -7,8 +7,11 @@ import re
 import tempfile
 import uuid
 
+import httpx
+
 from app.analysis.heuristics import find_countdown_elements
 from app.analysis.visual import contrast_ratio
+from app.robots import USER_AGENT, RobotsDisallowedError, fetch_robots_parser
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +26,17 @@ DEFAULT_CONSENT_RULES_DIR = str(
 # flow-walk work on the same page while still tolerating legitimately
 # slow-but-real sites.
 NAV_TIMEOUT_MS = int(os.environ.get("NAV_TIMEOUT_MS", "12000"))
+
+# NAV_TIMEOUT_MS only bounds the initial page.goto() — none of
+# _snapshot_page's own Playwright calls (page.content(), screenshot(), the
+# reload inside verify_countdown_reset, ...) have a timeout of their own. A
+# real site can leave the page mid-navigation after a flow-walk click (e.g.
+# into a login/bot wall) where page.content() never resolves, hanging the
+# whole crawl forever — confirmed against a live site (a "cancel
+# subscription"-shaped click on a real e-commerce site's footer link).
+# _snapshot_page is the one function every "read the page now" call in the
+# crawl pipeline routes through, so bounding it there covers all callers.
+SNAPSHOT_TIMEOUT_SECONDS = int(os.environ.get("SNAPSHOT_TIMEOUT_SECONDS", "20"))
 
 # Best-effort keywords for identifying a "reject/decline all" click target when
 # a Consent-O-Matic rule doesn't carry an explicit reject hint.
@@ -342,6 +356,13 @@ async def apply_consent_rules(page, rules_dir: str = DEFAULT_CONSENT_RULES_DIR) 
 
 
 async def _snapshot_page(page, skip_diff_sleep: bool = False, consent_result: dict | None = None) -> dict:
+    return await asyncio.wait_for(
+        _snapshot_page_impl(page, skip_diff_sleep, consent_result),
+        timeout=SNAPSHOT_TIMEOUT_SECONDS,
+    )
+
+
+async def _snapshot_page_impl(page, skip_diff_sleep: bool, consent_result: dict | None) -> dict:
     dom_before = await page.content()
     if not skip_diff_sleep:
         await asyncio.sleep(1.5)  # Dapde principle: catch script-driven DOM changes
@@ -501,6 +522,13 @@ async def crawl_page(
     har_path = str(pathlib.Path(har_dir) / f"crawl-{uuid.uuid4().hex}.har")
 
     context = await browser.new_context(record_har_path=har_path)
+
+    async with httpx.AsyncClient() as robots_client:
+        robots_parser = await fetch_robots_parser(url, robots_client)
+    if not robots_parser.can_fetch(USER_AGENT, url):
+        await context.close()
+        raise RobotsDisallowedError(url)
+
     page = await context.new_page()
     await page.goto(url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
 
