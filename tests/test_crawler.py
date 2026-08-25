@@ -223,6 +223,45 @@ async def test_capture_text_element_boxes_returns_position_and_text():
     assert accept_box["width"] > 0 and accept_box["height"] > 0
 
 
+TALL_PAGE_URL = pathlib.Path(__file__).parent.joinpath(
+    "fixtures/tall_page_with_below_fold_text.html"
+).as_uri()
+
+
+@pytest.mark.asyncio
+async def test_snapshot_page_captures_full_page_so_below_fold_quotes_stay_in_bounds():
+    """Regression: found via a real scan against amazon.de — every
+    'markiert ansehen' (annotated) evidence image was pixel-identical to
+    the plain screenshot. Root cause: _snapshot_page's page.screenshot()
+    had no full_page=True, so it only captured the viewport (Playwright's
+    1280x720 default) — but _capture_text_element_boxes reports
+    getBoundingClientRect() positions for every leaf text element on the
+    whole page, including ones below the fold. Highlighting a below-fold
+    quote against a viewport-only screenshot draws the marker outside the
+    captured image — silently invisible, no error, no crash."""
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        page = await browser.new_page()
+        await page.goto(TALL_PAGE_URL)
+        snapshot = await _snapshot_page(page)
+        await browser.close()
+
+    below_fold_box = next(b for b in snapshot["text_boxes"] if b["text"] == "9,99 Euro ab dem 2. Monat")
+    assert below_fold_box["y"] > 720  # genuinely below Playwright's default viewport height
+
+    from PIL import Image
+    import io
+    img = Image.open(io.BytesIO(snapshot["screenshot"]))
+    assert img.size[1] > below_fold_box["y"]  # the capture must actually extend that far down
+
+    from app.analysis.screenshot_annotate import highlight_quote_in_screenshot
+    annotated = highlight_quote_in_screenshot(
+        snapshot["screenshot"], "9,99 Euro ab dem 2. Monat", snapshot["text_boxes"]
+    )
+    assert annotated is not None
+    assert annotated != snapshot["screenshot"]  # something was actually drawn, not silently a no-op
+
+
 @pytest.mark.asyncio
 async def test_apply_consent_rules_scopes_reddit_rules_bare_button_selector(tmp_path):
     """Regression test: reddit.json's only actionable rule is a bare "button"

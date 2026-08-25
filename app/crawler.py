@@ -379,7 +379,14 @@ async def _snapshot_page_impl(page, skip_diff_sleep: bool, consent_result: dict 
         await asyncio.sleep(1.5)  # Dapde principle: catch script-driven DOM changes
     dom_after = await page.content()
 
-    screenshot = await page.screenshot()
+    # full_page=True: without it, page.screenshot() only captures the
+    # viewport (Playwright's default 1280x720) — but
+    # _capture_text_element_boxes below reports getBoundingClientRect()
+    # positions for every leaf text element on the WHOLE page, including
+    # ones below the fold. A viewport-only screenshot made every
+    # highlight_quote_in_screenshot marker for a below-fold quote land
+    # outside the captured image: silently invisible, no error, no crash.
+    screenshot = await page.screenshot(full_page=True)
 
     consent_result = consent_result or {}
     accept_style = consent_result.get("accept_style")
