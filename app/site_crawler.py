@@ -418,7 +418,7 @@ async def crawl_site(
                 # stuck mid-navigation (login/bot wall, stalled AJAX) —
                 # caught here like any other broken-page load, so one bad
                 # URL is skipped instead of aborting the whole site scan.
-                snapshot = await _snapshot_page(page, consent_result=consent_result)
+                snapshot = await _snapshot_page(page, consent_result=consent_result, browser=browser)
             except Exception as exc:  # noqa: BLE001 - deliberate broad catch, a dead link shouldn't kill the crawl
                 logger.warning("crawl_site: failed to load %r: %s", url, exc)
                 await page.close()

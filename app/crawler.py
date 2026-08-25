@@ -1,4 +1,5 @@
 import asyncio
+import difflib
 import json
 import logging
 import os
@@ -355,14 +356,14 @@ async def apply_consent_rules(page, rules_dir: str = DEFAULT_CONSENT_RULES_DIR) 
         return result
 
 
-async def _snapshot_page(page, skip_diff_sleep: bool = False, consent_result: dict | None = None) -> dict:
+async def _snapshot_page(page, skip_diff_sleep: bool = False, consent_result: dict | None = None, browser=None) -> dict:
     return await asyncio.wait_for(
-        _snapshot_page_impl(page, skip_diff_sleep, consent_result),
+        _snapshot_page_impl(page, skip_diff_sleep, consent_result, browser),
         timeout=SNAPSHOT_TIMEOUT_SECONDS,
     )
 
 
-async def _snapshot_page_impl(page, skip_diff_sleep: bool, consent_result: dict | None) -> dict:
+async def _snapshot_page_impl(page, skip_diff_sleep: bool, consent_result: dict | None, browser=None) -> dict:
     dom_before = await page.content()
     if not skip_diff_sleep:
         await asyncio.sleep(1.5)  # Dapde principle: catch script-driven DOM changes
@@ -399,7 +400,7 @@ async def _snapshot_page_impl(page, skip_diff_sleep: bool, consent_result: dict 
     # invalidate anything this function still needs).
     countdown_findings = find_countdown_elements(dom_after)
     try:
-        await verify_countdown_reset(page, countdown_findings)
+        await verify_countdown_reset(page, countdown_findings, browser=browser)
     except Exception as exc:  # noqa: BLE001 - deliberate broad catch, page state can vary
         logger.debug("_snapshot_page: verify_countdown_reset failed: %s", exc)
 
@@ -434,12 +435,64 @@ def _looks_reset(text_before: str, text_after: str) -> bool:
     return bool(numbers_after)
 
 
-async def verify_countdown_reset(page, findings: list[dict]) -> None:
+_TIMER_VALUE_RE = re.compile(r'(?:(\d{1,2}):)?(\d{1,2}):(\d{2})')
+
+
+def _parse_timer_seconds(text: str) -> int | None:
+    """Extracts MM:SS or HH:MM:SS from a countdown's text into seconds, for
+    numeric before/after comparison. None if no timer-shaped substring is found."""
+    match = _TIMER_VALUE_RE.search(text)
+    if not match:
+        return None
+    hours = int(match.group(1)) if match.group(1) else 0
+    minutes = int(match.group(2))
+    seconds = int(match.group(3))
+    return hours * 3600 + minutes * 60 + seconds
+
+
+async def _verify_cross_session_countdown(page, browser, selector: str, text_a: str, finding: dict) -> None:
+    """Opens a second, completely isolated browser context (fresh cookies/
+    storage, no shared clock) and re-visits the same URL — a countdown
+    genuinely tied to a fixed global deadline shows the same remaining time
+    to any visitor at the same real moment regardless of when their session
+    started; a countdown computed relative to *this visitor's own page load*
+    shows that same starting value to every fresh visitor, forever — the
+    classic Fake-Urgency tell ("nur noch 10 Minuten", jedes Mal). Best-effort,
+    never raises. ponytail: ±2s tolerance for render/network jitter between
+    the two loads, and only compares the raw parsed seconds value, not a
+    general fuzzy-text comparison."""
+    seconds_a = _parse_timer_seconds(text_a)
+    if seconds_a is None:
+        return
+    try:
+        context_b = await browser.new_context()
+        page_b = await context_b.new_page()
+        await page_b.goto(page.url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
+        text_b = await page_b.locator(selector).first.inner_text(timeout=2000)
+        await context_b.close()
+    except Exception as exc:  # noqa: BLE001 - deliberate broad catch, page state can vary
+        logger.debug("verify_countdown_reset: cross-session check failed: %s", exc)
+        return
+
+    seconds_b = _parse_timer_seconds(text_b)
+    if seconds_b is not None and abs(seconds_a - seconds_b) <= 2:
+        finding["confidence_score"] = round(min(finding["confidence_score"] + 0.25, 1.0), 2)
+        finding["evidence_data"]["cross_session_match"] = (
+            "Neuer, isolierter Besucher (frischer Browser-Kontext) sieht denselben "
+            f"Countdown-Startwert ({text_b.strip()}) — Timer wirkt nicht an eine echte, "
+            "globale Deadline gekoppelt."
+        )
+
+
+async def verify_countdown_reset(page, findings: list[dict], browser=None) -> None:
     """Behavioral verification for Fake-Urgency countdown findings: jump
     the page's virtual clock forward and check whether the countdown text
     still shows a fresh value instead of expiring — the "Countdown startet
     nach Ablauf neu" test from the legal research sheet, via Playwright's
-    Clock API instead of really waiting. Mutates findings in place;
+    Clock API instead of really waiting. Also documents the resulting page
+    change as a text diff, and (if `browser` is given) checks whether a
+    brand-new, isolated session sees the same countdown value (see
+    _verify_cross_session_countdown). Mutates findings in place;
     best-effort, never raises (a failed check just leaves the finding
     as-is). No-op if there's nothing to verify.
     ponytail: only catches client-computed countdowns (JS Date/timers) —
@@ -467,8 +520,10 @@ async def verify_countdown_reset(page, findings: list[dict]) -> None:
             await page.reload()
             locator = page.locator(selector).first
             text_before = await locator.inner_text(timeout=2000)
+            body_before = await page.inner_text("body")
             await page.clock.fast_forward("06:00:00")
             text_after = await locator.inner_text(timeout=2000)
+            body_after = await page.inner_text("body")
         except Exception as exc:  # noqa: BLE001 - deliberate broad catch, page state can vary
             logger.debug("verify_countdown_reset failed for %s: %s", selector, exc)
             continue
@@ -479,10 +534,28 @@ async def verify_countdown_reset(page, findings: list[dict]) -> None:
                 "Zeit künstlich vorgespult (+6h) — Countdown zeigt weiterhin einen "
                 "frischen Restwert statt abgelaufen zu sein."
             )
+            # Cross-session corroboration only makes sense once the
+            # fast-forward check already flagged a reset — two sessions
+            # started milliseconds apart (no way to wait real hours during a
+            # live scan) would show near-identical remaining time for a
+            # genuine deadline too, so on its own this comparison can't
+            # discriminate real vs. fake; it only adds evidence once the
+            # timer is already suspected of resetting per-visitor.
+            if browser is not None:
+                await _verify_cross_session_countdown(page, browser, selector, text_before, finding)
         else:
             finding["evidence_data"]["clock_verified"] = (
                 "Zeit künstlich vorgespult (+6h) — kein Reset erkannt."
             )
+
+        diff_lines = [
+            line for line in difflib.unified_diff(
+                body_before.splitlines(), body_after.splitlines(), lineterm=""
+            )
+            if line.startswith(("+", "-")) and not line.startswith(("+++", "---"))
+        ]
+        if diff_lines:
+            finding["evidence_data"]["time_diff_sample"] = "\n".join(diff_lines[:10])
 
 
 _CAPTCHA_MARKERS = (
@@ -534,7 +607,7 @@ async def crawl_page(
 
     consent_result = await apply_consent_rules(page, consent_rules_dir)
 
-    snapshot = await _snapshot_page(page, consent_result=consent_result)
+    snapshot = await _snapshot_page(page, consent_result=consent_result, browser=browser)
 
     await page.close()
     await context.close()  # flushes the HAR file to disk

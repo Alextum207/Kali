@@ -1,3 +1,4 @@
+import asyncio
 import os
 import pathlib
 import pytest
@@ -157,6 +158,38 @@ async def test_snapshot_page_skip_diff_sleep_skips_the_fixed_wait():
         await browser.close()
 
     assert elapsed < 1.0  # well under the 1.5s fixed sleep it would pay otherwise
+
+
+@pytest.mark.asyncio
+async def test_snapshot_page_times_out_instead_of_hanging_forever(monkeypatch):
+    """Root cause of a real-world crawl hang: _snapshot_page's Playwright
+    calls (page.content(), etc.) have no timeout of their own — NAV_TIMEOUT_MS
+    only bounds the initial page.goto(). A real site can leave the page in a
+    state where page.content() never resolves (e.g. mid-navigation after a
+    flow-walk click into a login/bot wall) — _snapshot_page must bound that
+    with its own timeout instead of hanging the whole crawl forever."""
+    import app.crawler as crawler_module
+
+    monkeypatch.setattr(crawler_module, "SNAPSHOT_TIMEOUT_SECONDS", 0.5)
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        page = await browser.new_page()
+        await page.goto(FIXTURE_URL)
+
+        async def hangs_forever(*args, **kwargs):
+            await asyncio.Event().wait()
+
+        monkeypatch.setattr(page, "content", hangs_forever)
+
+        start = time.monotonic()
+        with pytest.raises(asyncio.TimeoutError):
+            await _snapshot_page(page)
+        elapsed = time.monotonic() - start
+
+        await browser.close()
+
+    assert elapsed < 5.0  # bounded by SNAPSHOT_TIMEOUT_SECONDS, not left hanging
 
 
 @pytest.mark.asyncio
@@ -386,7 +419,7 @@ async def test_verify_countdown_reset_boosts_confidence_when_timer_restarts():
         browser = await p.chromium.launch()
         page = await browser.new_page()
         await page.goto(COUNTDOWN_RESET_FIXTURE_URL)
-        await verify_countdown_reset(page, [finding])
+        await verify_countdown_reset(page, [finding], browser=browser)
         await browser.close()
 
     assert finding["confidence_score"] > 0.7
@@ -414,8 +447,155 @@ async def test_verify_countdown_reset_leaves_confidence_unchanged_when_timer_exp
         browser = await p.chromium.launch()
         page = await browser.new_page()
         await page.goto(COUNTDOWN_EXPIRES_FIXTURE_URL)
-        await verify_countdown_reset(page, [finding])
+        await verify_countdown_reset(page, [finding], browser=browser)
         await browser.close()
 
     assert finding["confidence_score"] == 0.7
     assert "clock_verified" in finding["evidence_data"]
+
+
+class _FakeClock:
+    async def install(self):
+        pass
+
+    async def fast_forward(self, duration):
+        pass
+
+
+class _FakeCountdownLocator:
+    def __init__(self, page):
+        self._page = page
+
+    async def inner_text(self, timeout=None):
+        return next(self._page._locator_texts)
+
+
+class _FakeCountdownLocatorWrapper:
+    def __init__(self, page):
+        self.first = _FakeCountdownLocator(page)
+
+
+class _FakeCountdownPage:
+    """Deterministic double for verify_countdown_reset's page argument — real
+    browser timing (see debug against countdown_reset_page.html) can make
+    text_before == text_after by coincidence (a full-value reset lands
+    exactly back on the same displayed string), so the diff-capture logic
+    itself is tested here with controlled inputs instead of relying on a
+    real fixture's timing."""
+
+    def __init__(self, locator_texts, body_texts):
+        self.clock = _FakeClock()
+        self.url = "https://example.com/deal"
+        self._locator_texts = iter(locator_texts)
+        self._body_texts = iter(body_texts)
+
+    async def reload(self):
+        pass
+
+    def locator(self, selector):
+        return _FakeCountdownLocatorWrapper(self)
+
+    async def inner_text(self, selector):
+        return next(self._body_texts)
+
+
+@pytest.mark.asyncio
+async def test_verify_countdown_reset_records_time_diff_sample():
+    from app.crawler import verify_countdown_reset
+
+    finding = {
+        "pattern_type": "Fake Urgency",
+        "confidence_score": 0.7,
+        "evidence_data": {"selector": "#countdown"},
+    }
+    page = _FakeCountdownPage(
+        locator_texts=["02:00", "02:00"],
+        body_texts=["Angebot endet in: 02:00", "Angebot endet in: 01:55 - Neuer Hinweis"],
+    )
+
+    await verify_countdown_reset(page, [finding])
+
+    assert "time_diff_sample" in finding["evidence_data"]
+    assert "01:55" in finding["evidence_data"]["time_diff_sample"]
+
+
+def test_parse_timer_seconds_handles_mmss_and_hhmmss():
+    from app.crawler import _parse_timer_seconds
+
+    assert _parse_timer_seconds("02:00") == 120
+    assert _parse_timer_seconds("01:02:03") == 3723
+    assert _parse_timer_seconds("no digits here") is None
+
+
+class _FakeLocator:
+    def __init__(self, text):
+        self._text = text
+
+    async def inner_text(self, timeout=None):
+        return self._text
+
+
+class _FakeLocatorWrapper:
+    def __init__(self, text):
+        self.first = _FakeLocator(text)
+
+
+class _FakePageB:
+    def __init__(self, text):
+        self._text = text
+
+    async def goto(self, url, wait_until=None, timeout=None):
+        pass
+
+    def locator(self, selector):
+        return _FakeLocatorWrapper(self._text)
+
+
+class _FakeContext:
+    def __init__(self, page_b):
+        self._page_b = page_b
+        self.closed = False
+
+    async def new_page(self):
+        return self._page_b
+
+    async def close(self):
+        self.closed = True
+
+
+class _FakeBrowser:
+    def __init__(self, page_b):
+        self._page_b = page_b
+
+    async def new_context(self):
+        return _FakeContext(self._page_b)
+
+
+class _FakePageA:
+    url = "https://example.com/deal"
+
+
+@pytest.mark.asyncio
+async def test_verify_cross_session_countdown_flags_matching_value():
+    from app.crawler import _verify_cross_session_countdown
+
+    finding = {"confidence_score": 0.7, "evidence_data": {}}
+    browser = _FakeBrowser(_FakePageB("02:00"))
+
+    await _verify_cross_session_countdown(_FakePageA(), browser, "#countdown", "02:00", finding)
+
+    assert finding["confidence_score"] > 0.7
+    assert "cross_session_match" in finding["evidence_data"]
+
+
+@pytest.mark.asyncio
+async def test_verify_cross_session_countdown_ignores_different_value():
+    from app.crawler import _verify_cross_session_countdown
+
+    finding = {"confidence_score": 0.7, "evidence_data": {}}
+    browser = _FakeBrowser(_FakePageB("01:30"))
+
+    await _verify_cross_session_countdown(_FakePageA(), browser, "#countdown", "02:00", finding)
+
+    assert finding["confidence_score"] == 0.7
+    assert "cross_session_match" not in finding["evidence_data"]

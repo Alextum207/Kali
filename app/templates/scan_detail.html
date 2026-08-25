@@ -89,6 +89,12 @@
       {% if f.evidence_data.get("clock_verified") %}
       <br><span class="hint">{{ f.evidence_data.get("clock_verified") }}</span>
       {% endif %}
+      {% if f.evidence_data.get("cross_session_match") %}
+      <br><span class="hint">{{ f.evidence_data.get("cross_session_match") }}</span>
+      {% endif %}
+      {% if f.evidence_data.get("time_diff_sample") %}
+      <br><span class="hint">Änderung nach simulierter Zeit: <code>{{ f.evidence_data.get("time_diff_sample") }}</code></span>
+      {% endif %}
     </td>
     <td>{% if f.page_url %}<a href="{{ f.page_url }}" target="_blank">{{ f.page_url }}</a>{% else %}–{% endif %}</td>
     <td>{{ f.created_at }}</td>
