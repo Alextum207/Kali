@@ -244,6 +244,37 @@ async def test_run_site_scan_persists_pages_and_page_scoped_findings(tmp_path, m
 
 
 @pytest.mark.asyncio
+async def test_run_site_scan_tolerates_missing_har_file(tmp_path, monkeypatch):
+    """Root cause of a real-world scan ending in status='error' with 0 pages
+    even after the crawl itself succeeded: crawl_site's context.close() can
+    time out (CONTEXT_CLOSE_TIMEOUT_SECONDS, site_crawler.py) before the HAR
+    file is ever written, so site_result["har_path"] can point at a file
+    that doesn't exist. run_site_scan must not let that crash the whole
+    scan — a missing HAR is a known, accepted degradation now."""
+    missing_har_path = str(tmp_path / "never-written.har")
+    fake_result = {
+        "pages": [dict(FAKE_SITE_RESULT["pages"][0])],
+        "har_path": missing_har_path,
+    }
+
+    async def fake_crawl_site(start_url, browser, max_pages, har_dir, llm_client=None):
+        return fake_result
+
+    async def fake_run_analysis(dom_html, button_styles, llm_client=None, page=None):
+        return []
+
+    monkeypatch.setattr("app.scan.crawl_site", fake_crawl_site)
+    monkeypatch.setattr("app.scan.run_analysis", fake_run_analysis)
+    monkeypatch.setattr("app.scan.rfc3161_timestamp", lambda data: None)
+
+    conn = init_db(":memory:")
+    scan_id = await run_site_scan("https://example.com", conn, str(tmp_path), browser=None, max_pages=5)
+
+    pages = get_pages(conn, scan_id)
+    assert len(pages) == 1  # completed instead of raising FileNotFoundError
+
+
+@pytest.mark.asyncio
 async def test_run_site_scan_caches_citation_fetch_per_norm(tmp_path, monkeypatch):
     """Two pages each produce a finding mapping to the same target_norm —
     fetch_citation must be called once for that norm, not once per finding."""

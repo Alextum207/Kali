@@ -19,6 +19,7 @@ from fastapi.responses import RedirectResponse, HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from playwright.async_api import async_playwright
+from pydantic import BaseModel
 
 from app.compliance import CONSUMER_DESCRIPTIONS, EVIDENCE_HINTS, aggregate_risk_score
 from app.db import (
@@ -62,12 +63,15 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Dark-Pattern-Monitor", lifespan=lifespan)
 
-# Read-only JSON API for the separate frontend/ (Vite dev server, default
-# port 8080) — the Jinja2 UI above doesn't need this, it's same-origin.
+# JSON API for the separate frontend/ (Vite dev server, default port 8080)
+# — the Jinja2 UI above doesn't need this, it's same-origin. POST is
+# required for api_start_scan (POST /api/scans) — GET-only here silently
+# fails the browser's CORS preflight for that route (fetch() throws
+# "Failed to fetch", not a readable HTTP error).
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[os.environ.get("FRONTEND_ORIGIN", "http://localhost:8080")],
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST"],
 )
 
 templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "templates"))
@@ -198,14 +202,15 @@ async def _run_scan_background(scan_id: int, url: str, max_pages: int | None, br
         bg_conn.close()
 
 
-@app.post("/scans")
-async def start_scan(
+def _start_scan(
     request: Request,
     background_tasks: BackgroundTasks,
-    url: str = Form(...),
-    max_pages: int | None = Form(None),
-    conn: sqlite3.Connection = Depends(_get_conn),
-):
+    url: str,
+    max_pages: int | None,
+    conn: sqlite3.Connection,
+) -> int:
+    """Shared by the form-post (HTML) and JSON scan-start routes: normalize,
+    validate, insert the scan row, and schedule the background crawl."""
     url = url.strip()
     if url and urllib.parse.urlsplit(url).scheme not in ("http", "https"):
         # Root cause of "Scan starten hängt": the dashboard's URL field used
@@ -229,7 +234,37 @@ async def start_scan(
     background_tasks.add_task(
         _run_scan_background, scan_id, url, max_pages, request.app.state.browser
     )
+    return scan_id
+
+
+@app.post("/scans")
+async def start_scan(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    url: str = Form(...),
+    max_pages: int | None = Form(None),
+    conn: sqlite3.Connection = Depends(_get_conn),
+):
+    scan_id = _start_scan(request, background_tasks, url, max_pages, conn)
     return RedirectResponse(url=f"/scans/{scan_id}", status_code=303)
+
+
+class ScanRequest(BaseModel):
+    url: str
+    max_pages: int | None = None
+
+
+@app.post("/api/scans")
+async def api_start_scan(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    body: ScanRequest,
+    conn: sqlite3.Connection = Depends(_get_conn),
+):
+    # JSON counterpart to POST /scans for the React frontend (frontend/),
+    # which needs the new scan_id back instead of a 303 to the Jinja2 page.
+    scan_id = _start_scan(request, background_tasks, body.url, body.max_pages, conn)
+    return {"scan_id": scan_id}
 
 
 @app.get("/scans/compare", response_class=HTMLResponse)

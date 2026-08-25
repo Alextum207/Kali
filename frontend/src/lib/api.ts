@@ -1,8 +1,8 @@
-// Thin client for the FastAPI backend's read-only JSON API (app/main.py's
-// /api/scans routes). Not yet called from any page — that's the next step,
-// wiring Dashboard.tsx/CaseAnalysis.tsx onto these instead of their mock data.
+// Thin client for the FastAPI backend's JSON API (app/main.py's /api/scans
+// routes). Used by CaseAnalysis.tsx to start and poll a scan; Dashboard.tsx
+// still runs on mock data.
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
 export interface Finding {
   id: number;
@@ -49,3 +49,16 @@ export const getScan = (scanId: number) =>
 
 export const getPageFindings = (scanId: number, pageId: number) =>
   getJSON<{ scan: Scan; findings: Finding[] }>(`/api/scans/${scanId}/pages/${pageId}`);
+
+export async function postScan(url: string): Promise<{ scan_id: number }> {
+  const res = await fetch(`${API_BASE_URL}/api/scans`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url }),
+  });
+  if (!res.ok) {
+    const detail = await res.json().catch(() => null);
+    throw new Error(detail?.detail ?? `POST /api/scans -> ${res.status}`);
+  }
+  return res.json();
+}

@@ -32,9 +32,18 @@ def _fire_and_forget(coro) -> None:
     task.add_done_callback(_background_tasks.discard)
 
 
-def _read_and_hash(path: str) -> str:
-    with open(path, "rb") as f:
-        return sha256_bytes(f.read())
+def _read_and_hash(path: str) -> str | None:
+    """None if the HAR file doesn't exist — crawl_site's context.close()
+    (which flushes the HAR) has its own CONTEXT_CLOSE_TIMEOUT_SECONDS bound
+    and can abandon a slow flush on a heavy real site, leaving no file at
+    `path` at all. That's now a known, accepted outcome (see
+    site_crawler.py), not a reason to fail the whole scan over a missing
+    piece of evidence."""
+    try:
+        with open(path, "rb") as f:
+            return sha256_bytes(f.read())
+    except FileNotFoundError:
+        return None
 
 
 def _crawl_time_findings(page_data: dict) -> list[dict]:

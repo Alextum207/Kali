@@ -241,6 +241,36 @@ def test_start_scan_rejects_unsafe_url(tmp_path, monkeypatch):
         assert response.status_code == 400
 
 
+def test_api_start_scan_returns_scan_id(tmp_path, monkeypatch):
+    # JSON counterpart to POST /scans, used by the React frontend.
+    monkeypatch.setattr(main_module, "DB_PATH", str(tmp_path / "test.db"))
+    monkeypatch.setattr(main_module, "EVIDENCE_DIR", str(tmp_path / "evidence"))
+
+    async def fake_run_site_scan(url, conn, evidence_dir, browser=None, max_pages=None, llm_client=None, scan_id=None):
+        return scan_id
+
+    monkeypatch.setattr(main_module, "run_site_scan", fake_run_site_scan)
+
+    with TestClient(main_module.app) as client:
+        response = client.post("/api/scans", json={"url": "https://example.com"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert isinstance(body["scan_id"], int)
+
+    with TestClient(main_module.app) as client:
+        detail = client.get(f"/api/scans/{body['scan_id']}")
+    assert detail.status_code == 200
+    assert detail.json()["scan"]["url"] == "https://example.com"
+
+
+def test_api_start_scan_rejects_unsafe_url(tmp_path, monkeypatch):
+    monkeypatch.setattr(main_module, "DB_PATH", str(tmp_path / "test.db"))
+    with TestClient(main_module.app) as client:
+        response = client.post("/api/scans", json={"url": "file:///etc/passwd"})
+    assert response.status_code == 400
+
+
 def test_start_scan_marks_status_error_when_captcha_required(tmp_path, monkeypatch):
     # Scanning now runs in the background after an immediate redirect (see
     # Teil B of the plan), so a mid-scan CaptchaRequiredError can no longer
@@ -636,3 +666,23 @@ def test_consumer_report_404_for_missing_scan(tmp_path, monkeypatch):
     with TestClient(main_module.app) as client:
         response = client.get("/scans/9999/consumer")
     assert response.status_code == 404
+
+
+def test_cors_preflight_allows_post_for_frontend_scan_start():
+    """Regression: the CORS middleware's allow_methods used to be GET-only
+    (a leftover from when the JSON API really was read-only) after
+    POST /api/scans was added for the React frontend — the browser's CORS
+    preflight for that route then failed with no readable HTTP error,
+    surfacing in the frontend only as fetch() throwing "Failed to fetch"."""
+    with TestClient(main_module.app) as client:
+        response = client.options(
+            "/api/scans",
+            headers={
+                "Origin": "http://localhost:8080",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type",
+            },
+        )
+
+    assert response.status_code == 200
+    assert "POST" in response.headers.get("access-control-allow-methods", "")
