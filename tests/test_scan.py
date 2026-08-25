@@ -519,3 +519,65 @@ async def test_run_site_scan_sets_impact_for_contrast_and_infinite_scroll_findin
     by_type = {f["pattern_type"]: f for f in findings}
     assert by_type["Visuelle Tarnung (Kontrast)"]["evidence_data"]["impact"] != "–"
     assert by_type["Exploiting Addiction (Infinite Scroll)"]["evidence_data"]["impact"] != "–"
+
+
+@pytest.mark.asyncio
+async def test_run_site_scan_detects_checkout_price_increase_across_flow_steps(tmp_path, monkeypatch):
+    """Two pages of the same checkout flow (same flow_group), price goes up
+    on step 2 without prior disclosure — a new 'Sneaking / Hidden Costs'
+    finding must appear, attached to the later page, with both a raw
+    screenshot_path and a baseline_screenshot_path pointing at the two
+    already-saved per-page screenshots (not new images)."""
+    har_file = tmp_path / "site-price.har"
+    har_file.write_bytes(b"{}")
+    site_result = {
+        "pages": [
+            {
+                "url": "https://example.com/product",
+                "category": "checkout_payment",
+                "dom_after": "<p>Preis: 49,99 €</p>",
+                "screenshot": _fake_png(),
+                "button_styles": None,
+                "infinite_scroll_detected": False,
+                "flow_group": 1,
+            },
+            {
+                "url": "https://example.com/checkout",
+                "category": "checkout_payment",
+                "dom_after": "<p>Zwischensumme: 49,99 €</p><p>Servicegebühr: 6,99 €</p>",
+                "screenshot": _fake_png(),
+                "button_styles": None,
+                "infinite_scroll_detected": False,
+                "flow_group": 1,
+            },
+        ],
+        "har_path": str(har_file),
+    }
+
+    async def fake_crawl_site(start_url, browser, max_pages, har_dir, llm_client=None):
+        return site_result
+
+    async def fake_run_analysis(dom_html, button_styles, llm_client=None, page=None):
+        return []
+
+    monkeypatch.setattr("app.scan.crawl_site", fake_crawl_site)
+    monkeypatch.setattr("app.scan.run_analysis", fake_run_analysis)
+    monkeypatch.setattr("app.scan.rfc3161_timestamp", lambda data: None)
+
+    conn = init_db(":memory:")
+    scan_id = await run_site_scan("https://example.com", conn, str(tmp_path), browser=None, max_pages=5)
+
+    findings = get_findings(conn, scan_id)
+    price_findings = [f for f in findings if f["pattern_type"] == "Sneaking / Hidden Costs"]
+    assert len(price_findings) == 1
+    evidence = price_findings[0]["evidence_data"]
+    assert evidence["baseline_price"] == 49.99
+    assert evidence["later_price"] == 56.98
+    assert os.path.isfile(evidence["screenshot_path"])
+    assert os.path.isfile(evidence["baseline_screenshot_path"])
+    assert evidence["screenshot_path"] != evidence["baseline_screenshot_path"]
+
+    pages = get_pages(conn, scan_id)
+    later_page_id = pages[1]["id"]
+    page_findings = get_page_findings(conn, later_page_id)
+    assert any(f["pattern_type"] == "Sneaking / Hidden Costs" for f in page_findings)

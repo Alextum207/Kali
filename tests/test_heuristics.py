@@ -5,6 +5,7 @@ from app.analysis.heuristics import (
     find_default_consent_checkboxes,
     find_autoplay_media,
     find_decoy_pricing,
+    find_price_increase_in_flow,
 )
 
 PRETICKED_HTML = """
@@ -196,3 +197,47 @@ def test_find_decoy_pricing_single_tier_no_finding():
 
 def test_find_decoy_pricing_no_currency_no_finding():
     assert find_decoy_pricing(NO_PRICE_HTML) == []
+
+
+def test_find_price_increase_in_flow_flags_hidden_fee_added_later():
+    flow_pages = [
+        {"dom_after": "<p>Preis: 49,99 €</p>"},
+        {"dom_after": "<p>Zwischensumme: 49,99 €</p><p>Servicegebühr: 6,99 €</p>"},
+    ]
+    findings = find_price_increase_in_flow(flow_pages)
+    assert len(findings) == 1
+    finding = findings[0]
+    assert finding["pattern_type"] == "Sneaking / Hidden Costs"
+    assert finding["evidence_data"]["baseline_price"] == 49.99
+    assert finding["evidence_data"]["later_price"] == 56.98
+    assert finding["evidence_data"]["baseline_page_index"] == 0
+    assert finding["evidence_data"]["later_page_index"] == 1
+
+
+def test_find_price_increase_in_flow_ignores_stable_price():
+    flow_pages = [
+        {"dom_after": "<p>Preis: 49,99 €</p>"},
+        {"dom_after": "<p>Gesamt: 49,99 €</p>"},
+    ]
+    assert find_price_increase_in_flow(flow_pages) == []
+
+
+def test_find_price_increase_in_flow_ignores_tiny_rounding_delta():
+    flow_pages = [
+        {"dom_after": "<p>Preis: 49,99 €</p>"},
+        {"dom_after": "<p>Preis: 50,00 €</p>"},
+    ]
+    assert find_price_increase_in_flow(flow_pages) == []
+
+
+def test_find_price_increase_in_flow_needs_at_least_two_pages():
+    assert find_price_increase_in_flow([{"dom_after": "<p>Preis: 49,99 €</p>"}]) == []
+    assert find_price_increase_in_flow([]) == []
+
+
+def test_find_price_increase_in_flow_ignores_page_with_no_price():
+    flow_pages = [
+        {"dom_after": "<p>Preis: 49,99 €</p>"},
+        {"dom_after": "<p>Warenkorb</p>"},
+    ]
+    assert find_price_increase_in_flow(flow_pages) == []

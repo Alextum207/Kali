@@ -400,6 +400,11 @@ async def crawl_site(
     visited: set[str] = set()
     pages: list[dict] = []
     completed_categories: set[str] = set()
+    # One flow_group id per main-loop iteration, shared by an initial_page
+    # and its flow_pages — lets find_price_increase_in_flow (app/scan.py)
+    # compare prices across the steps of the SAME checkout flow, not across
+    # unrelated pages that happen to be adjacent in the flat `pages` list.
+    flow_group_counter = 0
 
     try:
         while (
@@ -435,6 +440,7 @@ async def crawl_site(
                 await _check_infinite_scroll(page) if category in ("product_category", "other") else False
             )
 
+            flow_group_counter += 1
             initial_page = {
                 "url": url,
                 "category": category,
@@ -448,6 +454,7 @@ async def crawl_site(
                 "cookie_wall_detected": snapshot["cookie_wall_detected"],
                 "banner_screenshot": snapshot["banner_screenshot"],
                 "text_boxes": snapshot["text_boxes"],
+                "flow_group": flow_group_counter,
             }
             pages.append(initial_page)
 
@@ -468,6 +475,8 @@ async def crawl_site(
             initial_page["button_styles"] = updated_snapshot["button_styles"]
             initial_page["contrast_findings"] = updated_snapshot["contrast_findings"]
             initial_page["countdown_findings"] = updated_snapshot["countdown_findings"]
+            for flow_page in flow_pages:
+                flow_page["flow_group"] = flow_group_counter
             pages.extend(flow_pages)
             for flow_page in flow_pages:
                 visited.add(flow_page["url"])

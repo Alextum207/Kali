@@ -5,6 +5,7 @@ import httpx
 
 from app.crawler import crawl_page
 from app.site_crawler import crawl_site
+from app.analysis.heuristics import find_price_increase_in_flow
 from app.analysis.pipeline import run_analysis, IMPACT_MAP
 from app.analysis.screenshot_annotate import highlight_quote_in_screenshot
 from app.evidence import save_evidence, sha256_bytes, rfc3161_timestamp
@@ -138,6 +139,43 @@ def _crawl_time_findings(page_data: dict) -> list[dict]:
         })
 
     return findings
+
+
+def _checkout_price_increase_findings(
+    page_ids: list[int], pages: list[dict], evidence_dir: str, scan_id: int
+) -> list[tuple[dict, int]]:
+    """Groups (page_id, page_data) pairs by flow_group (app/site_crawler.py
+    ::crawl_site tags an initial_page and its flow_pages with the same id)
+    and runs find_price_increase_in_flow on each checkout_payment group.
+    Returns (finding, page_id) pairs ready for insert_finding — page_id is
+    the LATER step's, where the price jump became visible; the earlier
+    step's already-saved screenshot is attached as a second evidence image
+    (baseline_screenshot_path) rather than a new one being taken."""
+    groups: dict[int, list[tuple[int, dict]]] = {}
+    for page_id, page_data in zip(page_ids, pages):
+        flow_group = page_data.get("flow_group")
+        if flow_group is None:
+            continue
+        groups.setdefault(flow_group, []).append((page_id, page_data))
+
+    results = []
+    for group in groups.values():
+        if group[0][1].get("category") != "checkout_payment":
+            continue
+        group_pages = [page_data for _, page_data in group]
+        for finding in find_price_increase_in_flow(group_pages):
+            finding["target_norm"] = map_to_norm(finding["pattern_type"])
+            finding["evidence_data"]["impact"] = IMPACT_MAP.get(finding["pattern_type"], "–")
+            baseline_page_id = group[finding["evidence_data"]["baseline_page_index"]][0]
+            later_page_id = group[finding["evidence_data"]["later_page_index"]][0]
+            finding["evidence_data"]["screenshot_path"] = os.path.join(
+                evidence_dir, f"scan_{scan_id}_page_{later_page_id}_screenshot.png"
+            )
+            finding["evidence_data"]["baseline_screenshot_path"] = os.path.join(
+                evidence_dir, f"scan_{scan_id}_page_{baseline_page_id}_screenshot.png"
+            )
+            results.append((finding, later_page_id))
+    return results
 
 
 async def run_scan(url: str, conn, evidence_dir: str, browser=None) -> int:
@@ -314,6 +352,14 @@ async def run_site_scan(
             page_id, findings = await coro
             for finding in findings:
                 insert_finding(conn, scan_id, finding, page_id=page_id)
+
+    # Cross-page: needs every page's screenshot already saved to disk
+    # (guaranteed once every task above has completed) and isn't tied to a
+    # single page the way the per-page findings above are.
+    for finding, later_page_id in _checkout_price_increase_findings(
+        page_ids, site_result["pages"], evidence_dir, scan_id
+    ):
+        insert_finding(conn, scan_id, finding, page_id=later_page_id)
 
     mark_scan_status(conn, scan_id, "done")
     return scan_id

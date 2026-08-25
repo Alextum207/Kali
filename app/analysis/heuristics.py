@@ -276,3 +276,68 @@ def find_decoy_pricing(dom_html: str) -> list[dict]:
                     }
                 )
     return findings
+
+
+# Schwellen für find_price_increase_in_flow: ein Preisanstieg zählt nur,
+# wenn er sowohl relativ (5%) als auch absolut (0,50€) spürbar ist —
+# reines Rundungsrauschen (z.B. 49,99€ -> 50,00€) soll nicht als Fund
+# zählen.
+_PRICE_INCREASE_MIN_PCT = 0.05
+_PRICE_INCREASE_MIN_ABS = 0.50
+
+
+def find_price_increase_in_flow(flow_group_pages: list[dict]) -> list[dict]:
+    """Vergleicht die SUMME aller im Text gefundenen Preisnennungen (Proxy
+    für 'was der Nutzer insgesamt zahlt', deckt genau den Fall ab, dass
+    eine neue Position wie eine Servicegebühr erst auf einem späteren
+    Schritt dazukommt — nicht nur einen einzelnen größten Betrag, der eine
+    neue Zusatzzeile übersehen würde) zwischen dem ersten und jedem
+    folgenden Schritt eines Checkout-Flows.
+
+    ponytail: keine echte 'Gesamtsumme'-Semantik — wenn eine Seite denselben
+    Preis zweimal anzeigt (z.B. Kachel + Zusammenfassung), zählt er doppelt;
+    Upgrade-Pfad: ein <table>/Summenzeilen-Detektor, falls reale Scans zu
+    viele Fehltreffer zeigen."""
+    if len(flow_group_pages) < 2:
+        return []
+
+    def _sum_prices(dom_html: str) -> float | None:
+        matches = list(_PRICE_PATTERN.finditer(dom_html))
+        if not matches:
+            return None
+        return sum(_parse_price(m) for m in matches)
+
+    baseline_price = _sum_prices(flow_group_pages[0]["dom_after"])
+    if baseline_price is None:
+        return []
+
+    findings = []
+    for later_index in range(1, len(flow_group_pages)):
+        later_price = _sum_prices(flow_group_pages[later_index]["dom_after"])
+        if later_price is None:
+            continue
+        delta = later_price - baseline_price
+        if delta <= 0:
+            continue
+        delta_pct = delta / baseline_price
+        if delta_pct < _PRICE_INCREASE_MIN_PCT or delta < _PRICE_INCREASE_MIN_ABS:
+            continue
+        findings.append(
+            {
+                "pattern_type": "Sneaking / Hidden Costs",
+                "confidence_score": 0.75,
+                "evidence_data": {
+                    "note": (
+                        f"Preis stieg von {baseline_price:.2f}€ (Schritt 1) auf "
+                        f"{later_price:.2f}€ (Schritt {later_index + 1}) ohne "
+                        "vorherige Offenlegung."
+                    ),
+                    "baseline_price": round(baseline_price, 2),
+                    "later_price": round(later_price, 2),
+                    "price_increase_pct": round(delta_pct, 3),
+                    "baseline_page_index": 0,
+                    "later_page_index": later_index,
+                },
+            }
+        )
+    return findings

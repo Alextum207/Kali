@@ -576,6 +576,28 @@ async def test_crawl_site_walks_category_flow_across_pages_until_no_interaction(
 
 
 @pytest.mark.asyncio
+async def test_crawl_site_tags_initial_and_flow_pages_with_same_flow_group(tmp_path):
+    """find_price_increase_in_flow (app/analysis/heuristics.py) needs to
+    compare prices only within one checkout flow — step1 (initial_page)
+    and step2 (its flow_page) must share one flow_group id."""
+    client = _SequentialFakeClient([
+        '{"type": "click", "target": "a#next"}',  # step1 -> step2
+        '{"type": "none"}',  # step2: flow goal reached
+    ])
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        result = await crawl_site(
+            FLOW_CHECKOUT_URL, browser, max_pages=5, har_dir=str(tmp_path),
+            llm_client=client, url_validator=lambda url: None,
+        )
+        await browser.close()
+
+    flow_groups = [p["flow_group"] for p in result["pages"]]
+    assert len(flow_groups) == 2
+    assert flow_groups[0] == flow_groups[1]
+
+
+@pytest.mark.asyncio
 async def test_crawl_site_flow_stops_when_category_changes(tmp_path):
     client = _SequentialFakeClient([
         '{"type": "click", "target": "a#next"}',  # step1 (checkout) -> imprint (other)
