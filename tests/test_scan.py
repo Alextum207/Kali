@@ -581,3 +581,56 @@ async def test_run_site_scan_detects_checkout_price_increase_across_flow_steps(t
     later_page_id = pages[1]["id"]
     page_findings = get_page_findings(conn, later_page_id)
     assert any(f["pattern_type"] == "Sneaking / Hidden Costs" for f in page_findings)
+
+
+@pytest.mark.asyncio
+async def test_run_site_scan_survives_price_increase_detection_failure(tmp_path, monkeypatch):
+    """A bug in _checkout_price_increase_findings (or the heuristic it
+    calls) must not lose the findings already collected from every page,
+    or leave the scan stuck instead of marked done — same best-effort
+    contract as every other finding source in this file."""
+    har_file = tmp_path / "site-price-fail.har"
+    har_file.write_bytes(b"{}")
+    site_result = {
+        "pages": [
+            {
+                "url": "https://example.com/checkout",
+                "category": "checkout_payment",
+                "dom_after": "<html><body><input type='checkbox' id='nl' checked></body></html>",
+                "screenshot": b"\x89PNG-fake-bytes",
+                "button_styles": None,
+                "infinite_scroll_detected": False,
+                "flow_group": 1,
+            },
+        ],
+        "har_path": str(har_file),
+    }
+
+    async def fake_crawl_site(start_url, browser, max_pages, har_dir, llm_client=None):
+        return site_result
+
+    async def fake_run_analysis(dom_html, button_styles, llm_client=None, page=None):
+        return [
+            {
+                "pattern_type": "Pre-ticked Box",
+                "target_norm": "Art. 4 Nr. 11, Art. 7 Abs. 4 DSGVO",
+                "confidence_score": 0.9,
+                "evidence_data": {"selector": "#nl"},
+            }
+        ]
+
+    def broken_checkout_price_increase_findings(*args, **kwargs):
+        raise RuntimeError("simulated bug")
+
+    monkeypatch.setattr("app.scan.crawl_site", fake_crawl_site)
+    monkeypatch.setattr("app.scan.run_analysis", fake_run_analysis)
+    monkeypatch.setattr("app.scan.rfc3161_timestamp", lambda data: None)
+    monkeypatch.setattr("app.scan._checkout_price_increase_findings", broken_checkout_price_increase_findings)
+
+    conn = init_db(":memory:")
+    scan_id = await run_site_scan("https://example.com", conn, str(tmp_path), browser=None, max_pages=5)
+
+    from app.db import get_scan
+    assert get_scan(conn, scan_id)["status"] == "done"
+    findings = get_findings(conn, scan_id)
+    assert any(f["pattern_type"] == "Pre-ticked Box" for f in findings)

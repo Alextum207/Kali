@@ -52,9 +52,15 @@ def discover_links(dom_html: str, base_url: str, allowed_hosts: set[str]) -> lis
     return links
 
 
+# Named separately (not just a PAGE_CATEGORIES/TARGET_CATEGORIES literal)
+# because app/scan.py::_checkout_price_increase_findings also needs to
+# filter on exactly this string — importing the constant keeps the two
+# files from silently drifting apart if this category is ever renamed.
+CHECKOUT_PAYMENT_CATEGORY = "checkout_payment"
+
 PAGE_CATEGORIES = (
     "cookie_consent",
-    "checkout_payment",
+    CHECKOUT_PAYMENT_CATEGORY,
     "product_category",
     "account_subscription",
     "popup_leadform",
@@ -62,7 +68,7 @@ PAGE_CATEGORIES = (
 )
 
 _CATEGORY_KEYWORDS = {
-    "checkout_payment": ("checkout", "kasse", "warenkorb", "cart", "bestellung", "payment", "zahlung"),
+    CHECKOUT_PAYMENT_CATEGORY: ("checkout", "kasse", "warenkorb", "cart", "bestellung", "payment", "zahlung"),
     "account_subscription": ("/account", "/konto", "subscription", "kündig", "cancel", "mein abo"),
     "product_category": ("product", "produkt", "/p/", "kategorie", "category"),
 }
@@ -70,7 +76,7 @@ _CATEGORY_KEYWORDS = {
 # The 3 categories predictable from a URL alone (unlike cookie_consent and
 # popup_leadform, which are states detected on whatever page they occur on,
 # not link targets to steer toward) — used to prioritize the crawl queue.
-TARGET_CATEGORIES = ("checkout_payment", "account_subscription", "product_category")
+TARGET_CATEGORIES = (CHECKOUT_PAYMENT_CATEGORY, "account_subscription", "product_category")
 
 # Safety cap on decide_next_interaction/click loops within one category flow
 # (e.g. multi-step checkout) — a ceiling against dead-loop pages, not a goal.

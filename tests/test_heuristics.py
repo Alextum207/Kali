@@ -241,3 +241,50 @@ def test_find_price_increase_in_flow_ignores_page_with_no_price():
         {"dom_after": "<p>Warenkorb</p>"},
     ]
     assert find_price_increase_in_flow(flow_pages) == []
+
+
+def test_find_price_increase_in_flow_handles_zero_baseline_price():
+    """Regression: a genuinely free trial step ('0,00 €') as the flow's
+    first page used to crash with ZeroDivisionError in the percentage
+    calculation — exactly the classic 'free trial, then a hidden recurring
+    fee' pattern this heuristic exists to catch, so it must not be the one
+    input that takes the whole scan down."""
+    flow_pages = [
+        {"dom_after": "<p>Kostenlos testen: 0,00 €</p>"},
+        {"dom_after": "<p>Danach: 9,99 € pro Monat</p>"},
+    ]
+    findings = find_price_increase_in_flow(flow_pages)
+    assert len(findings) == 1
+    assert findings[0]["evidence_data"]["baseline_price"] == 0.0
+    assert findings[0]["evidence_data"]["later_price"] == 9.99
+
+
+def test_find_price_increase_in_flow_does_not_duplicate_a_plateaued_increase():
+    """Regression: once a price increase is flagged, a later step that's
+    still elevated by the same amount (not a *further* increase) must not
+    produce a second finding for what is evidence of the same underlying
+    fee."""
+    flow_pages = [
+        {"dom_after": "<p>Preis: 10,00 €</p>"},
+        {"dom_after": "<p>Preis: 15,00 €</p>"},  # +5, a fee appears
+        {"dom_after": "<p>Preis: 15,00 €</p>"},  # unchanged from step 2
+    ]
+    findings = find_price_increase_in_flow(flow_pages)
+    assert len(findings) == 1
+    assert findings[0]["evidence_data"]["later_page_index"] == 1
+
+
+def test_find_price_increase_in_flow_flags_a_second_genuinely_further_increase():
+    """Two real, independent escalations (a fee at step 2, another at step
+    3) must both be reported — only a *plateaued* repeat of the same jump
+    should be suppressed, not a second real increase."""
+    flow_pages = [
+        {"dom_after": "<p>Preis: 10,00 €</p>"},
+        {"dom_after": "<p>Preis: 15,00 €</p>"},  # +5
+        {"dom_after": "<p>Preis: 22,00 €</p>"},  # +7 more
+    ]
+    findings = find_price_increase_in_flow(flow_pages)
+    assert len(findings) == 2
+    assert findings[0]["evidence_data"]["later_page_index"] == 1
+    assert findings[1]["evidence_data"]["later_page_index"] == 2
+    assert findings[1]["evidence_data"]["later_price"] == 22.0

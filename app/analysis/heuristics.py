@@ -312,14 +312,24 @@ def find_price_increase_in_flow(flow_group_pages: list[dict]) -> list[dict]:
         return []
 
     findings = []
+    # reference_price tracks the last price a finding was raised against
+    # (starts at the baseline) — comparing every later step back to the
+    # ORIGINAL baseline would re-flag a step that's merely still elevated
+    # by an already-reported fee (no *further* increase happened) as a
+    # second, duplicate finding for the same underlying jump.
+    reference_price = baseline_price
     for later_index in range(1, len(flow_group_pages)):
         later_price = _sum_prices(flow_group_pages[later_index]["dom_after"])
         if later_price is None:
             continue
-        delta = later_price - baseline_price
+        delta = later_price - reference_price
         if delta <= 0:
             continue
-        delta_pct = delta / baseline_price
+        # A genuinely free (0,00€) starting step — real for trial-then-fee
+        # patterns — makes "percent increase" undefined; any real absolute
+        # jump off a free baseline is significant on its own, so the
+        # percentage gate is skipped rather than dividing by zero.
+        delta_pct = (delta / reference_price) if reference_price > 0 else float("inf")
         if delta_pct < _PRICE_INCREASE_MIN_PCT or delta < _PRICE_INCREASE_MIN_ABS:
             continue
         findings.append(
@@ -334,10 +344,13 @@ def find_price_increase_in_flow(flow_group_pages: list[dict]) -> list[dict]:
                     ),
                     "baseline_price": round(baseline_price, 2),
                     "later_price": round(later_price, 2),
-                    "price_increase_pct": round(delta_pct, 3),
+                    "price_increase_pct": (
+                        round((later_price - baseline_price) / baseline_price, 3) if baseline_price > 0 else None
+                    ),
                     "baseline_page_index": 0,
                     "later_page_index": later_index,
                 },
             }
         )
+        reference_price = later_price
     return findings

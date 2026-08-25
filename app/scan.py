@@ -1,16 +1,19 @@
 import asyncio
+import logging
 import os
 
 import httpx
 
 from app.crawler import crawl_page
-from app.site_crawler import crawl_site
+from app.site_crawler import crawl_site, CHECKOUT_PAYMENT_CATEGORY
 from app.analysis.heuristics import find_price_increase_in_flow
 from app.analysis.pipeline import run_analysis, IMPACT_MAP
 from app.analysis.screenshot_annotate import highlight_quote_in_screenshot
 from app.evidence import save_evidence, sha256_bytes, rfc3161_timestamp
 from app.compliance import fetch_citation, map_to_norm
 from app.db import insert_scan, insert_finding, insert_page, mark_scan_status
+
+logger = logging.getLogger(__name__)
 
 LEGAL_TEXT_MCP_BASE_URL = os.environ.get("LEGAL_TEXT_MCP_BASE_URL", "http://localhost:8091")
 
@@ -160,7 +163,7 @@ def _checkout_price_increase_findings(
 
     results = []
     for group in groups.values():
-        if group[0][1].get("category") != "checkout_payment":
+        if group[0][1].get("category") != CHECKOUT_PAYMENT_CATEGORY:
             continue
         group_pages = [page_data for _, page_data in group]
         for finding in find_price_increase_in_flow(group_pages):
@@ -355,10 +358,18 @@ async def run_site_scan(
 
     # Cross-page: needs every page's screenshot already saved to disk
     # (guaranteed once every task above has completed) and isn't tied to a
-    # single page the way the per-page findings above are.
-    for finding, later_page_id in _checkout_price_increase_findings(
-        page_ids, site_result["pages"], evidence_dir, scan_id
-    ):
+    # single page the way the per-page findings above are. Best-effort like
+    # every other finding source in this file — a bug here must not lose
+    # the findings already collected and written above, or leave the scan
+    # stuck instead of marked done.
+    try:
+        price_findings = _checkout_price_increase_findings(
+            page_ids, site_result["pages"], evidence_dir, scan_id
+        )
+    except Exception as exc:  # noqa: BLE001 - deliberate broad catch, see above
+        logger.warning("run_site_scan: _checkout_price_increase_findings failed: %s", exc)
+        price_findings = []
+    for finding, later_page_id in price_findings:
         insert_finding(conn, scan_id, finding, page_id=later_page_id)
 
     mark_scan_status(conn, scan_id, "done")
