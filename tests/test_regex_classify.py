@@ -17,6 +17,15 @@ def test_finds_fake_urgency_countdown_de():
     assert any(f["pattern_type"] == "Fake Urgency" for f in findings)
 
 
+def test_fake_urgency_does_not_match_plain_opening_hours():
+    """Regression: the source repo's colon-format alternative only fires
+    behind a live DOM-diff check in constants.js (does the number actually
+    decrease?) — on static text alone it matched any HH:MM-shaped
+    substring, so ordinary opening-hours text was misread as a countdown."""
+    findings = find_regex_patterns("Öffnungszeiten: Mo-Fr 9:00 - 18:00 Uhr")
+    assert not any(f["pattern_type"] == "Fake Urgency" for f in findings)
+
+
 def test_finds_fake_scarcity_en():
     findings = find_regex_patterns("Only 3 items available, order now.")
     assert any(f["pattern_type"] == "Fake Scarcity" for f in findings)
@@ -46,6 +55,20 @@ def test_finds_forced_continuity_en():
 
 def test_finds_forced_continuity_de():
     findings = find_regex_patterns("9,99 Euro ab dem 2. Monat.")
+    assert any(f["pattern_type"] == "Forced Continuity" for f in findings)
+
+
+def test_finds_forced_continuity_en_after_nth_month():
+    """Ported from constants.js — was previously only caught by the
+    browser extension, not the server-side (report-generating) classifier."""
+    findings = find_regex_patterns("This costs $10.99 after 12 months.")
+    assert any(f["pattern_type"] == "Forced Continuity" for f in findings)
+
+
+def test_finds_forced_continuity_de_danach_phrasing():
+    """Ported from constants.js — was previously only caught by the
+    browser extension, not the server-side (report-generating) classifier."""
+    findings = find_regex_patterns("Danach 10 Euro/Monat.")
     assert any(f["pattern_type"] == "Forced Continuity" for f in findings)
 
 

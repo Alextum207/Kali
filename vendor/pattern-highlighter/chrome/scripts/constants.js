@@ -226,9 +226,16 @@ export const patternConfig = {
                     // The previous state of the element is not used.
                     // Example: "5 other customers also bought this article"
                     //          "6 buyers have rated the following products [with 5 stars]"
+                    //          "128 customers have also bought this item" (no trailing object at all)
                     // [ \t]* instead of \s* — same block-boundary-gluing fix as
                     // the Scarcity pattern above (see its comment).
-                    return /\d+[ \t]*(?:other)?[ \t]*(?:customers?|clients?|buyers?|users?|shoppers?|purchasers?|people)[ \t]*(?:have[ \t]+)?[ \t]*(?:(?:also[ \t]*)?(?:bought|purchased|ordered)|(?:rated|reviewed))[ \t]*(?:this|the[ \t]*following)[ \t]*(?:product|article|item)s?/i.test(node.innerText);
+                    // The trailing "this/the following product(s)" object phrase is
+                    // optional (code review 2026-08-25): requiring it dropped
+                    // real social-proof phrasing that never names an object
+                    // ("6 buyers have rated it 5 stars") and drifted out of sync
+                    // with the simpler, tested pattern in
+                    // app/analysis/regex_classify.py.
+                    return /\d+[ \t]*(?:other)?[ \t]*(?:customers?|clients?|buyers?|users?|shoppers?|purchasers?|people)[ \t]*(?:have[ \t]+)?[ \t]*(?:(?:also[ \t]*)?(?:bought|purchased|ordered)|(?:rated|reviewed))(?:[ \t]*(?:this|the[ \t]*following)[ \t]*(?:product|article|item)s?)?/i.test(node.innerText);
                 },
                 function (node, nodeOld) {
                     // Return true if a match is found in the current text of the element,
@@ -237,8 +244,14 @@ export const patternConfig = {
                     // The previous state of the element is not used.
                     // Example: "5 andere Kunden kauften auch diesen Artikel"
                     //          "6 Käufer*innen haben folgende Produkte [mit 5 Sternen bewertet]"
+                    //          "128 Kunden haben auch gekauft" (no trailing object at all)
                     // Same [ \t]* fix as the English variant above.
-                    return /\d+[ \t]*(?:andere)?[ \t]*(?:Kunden?|Käufer|Besteller|Nutzer|Leute|Person(?:en)?)(?:(?:[ \t]*\/[ \t]*)?[_\-\*]?innen)?[ \t]*(?:(?:kauften|bestellten|haben)[ \t]*(?:auch|ebenfalls)?|(?:bewerteten|rezensierten))[ \t]*(?:diese[ns]?|(?:den|die|das)?[ \t]*folgenden?)[ \t]*(?:Produkte?|Artikel)/i.test(node.innerText);
+                    // Trailing "diese(n)/folgende(n) Produkte/Artikel" object
+                    // phrase made optional (code review 2026-08-25), same reason
+                    // as the English variant — real German phrasing like "haben
+                    // auch gekauft" doesn't always name an object, and requiring
+                    // one drifted out of sync with app/analysis/regex_classify.py.
+                    return /\d+[ \t]*(?:andere)?[ \t]*(?:Kunden?|Käufer|Besteller|Nutzer|Leute|Person(?:en)?)(?:(?:[ \t]*\/[ \t]*)?[_\-\*]?innen)?[ \t]*(?:(?:kauften|bestellten|haben)[ \t]*(?:auch|ebenfalls)?|(?:bewerteten|rezensierten))(?:[ \t]*(?:diese[ns]?|(?:den|die|das)?[ \t]*folgenden?)[ \t]*(?:Produkte?|Artikel))?/i.test(node.innerText);
                 }
             ],
             infoUrl: brw.i18n.getMessage("patternSocialProof_infoUrl"),
