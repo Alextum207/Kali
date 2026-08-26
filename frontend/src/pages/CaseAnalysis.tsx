@@ -131,7 +131,7 @@ const CaseAnalysis = () => {
           </form>
 
           {status === "error" && (
-            <p className="mt-4 text-sm text-destructive">{error ?? "Scan failed."}</p>
+            <p className="mt-4 text-sm text-destructive">{error ?? scan?.error_message ?? "Scan failed."}</p>
           )}
 
           {status === "idle" && (
