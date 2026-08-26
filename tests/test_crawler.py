@@ -205,6 +205,29 @@ async def test_snapshot_page_times_out_instead_of_hanging_forever(monkeypatch):
     assert elapsed < 5.0  # bounded by SNAPSHOT_TIMEOUT_SECONDS, not left hanging
 
 
+def test_timeout_constants_derive_from_page_budget(monkeypatch):
+    """NAV_TIMEOUT_MS/SNAPSHOT_TIMEOUT_SECONDS/CONSENT_TIMEOUT_SECONDS must
+    scale with SCAN_SECONDS_PER_PAGE_BUDGET instead of being independent
+    hardcoded values — otherwise raising the budget for a slower host (e.g.
+    Render) silently leaves the other three on stale defaults, which is
+    exactly the bug that caused a real crawl to bail out after 1 page."""
+    import importlib
+
+    import app.crawler as crawler_module
+
+    monkeypatch.setenv("SCAN_SECONDS_PER_PAGE_BUDGET", "60")
+    try:
+        importlib.reload(crawler_module)
+        assert crawler_module.NAV_TIMEOUT_MS == int(60 * 0.48 * 1000)
+        assert crawler_module.SNAPSHOT_TIMEOUT_SECONDS == int(60 * 0.8)
+        assert crawler_module.CONSENT_TIMEOUT_SECONDS == int(60 * 0.8)
+    finally:
+        # Restore default-env-derived values so later tests in this module
+        # (which reference these constants directly) see the normal 25s-budget
+        # defaults again.
+        importlib.reload(crawler_module)
+
+
 @pytest.mark.asyncio
 async def test_find_low_contrast_legal_text_flags_camouflaged_clause():
     async with async_playwright() as p:

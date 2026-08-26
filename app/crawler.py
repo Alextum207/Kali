@@ -20,14 +20,27 @@ DEFAULT_CONSENT_RULES_DIR = str(
     pathlib.Path(__file__).resolve().parent.parent / "data" / "consent_rules"
 )
 
-# Playwright's own default navigation timeout is 30000ms — too long
-# relative to a page's share of the scan time budget
-# (SCAN_SECONDS_PER_PAGE_BUDGET, 25s default in site_crawler.py): one
-# dead/slow page could burn more wall-clock than its whole nominal
-# per-page budget. 12s leaves headroom under that for routing/flow-walk
-# work on the same page while still tolerating legitimately slow-but-real
-# sites.
-NAV_TIMEOUT_MS = int(os.environ.get("NAV_TIMEOUT_MS", "12000"))
+# All three timeouts below are fractions of SCAN_SECONDS_PER_PAGE_BUDGET
+# (site_crawler.py:106, same env var name read independently here — crawler.py
+# can't import it directly without a circular import, since site_crawler.py
+# already imports from crawler.py) instead of independent hardcoded values.
+# Deriving them keeps nav/snapshot/consent budgets in sync with the overall
+# per-page budget automatically: raising SCAN_SECONDS_PER_PAGE_BUDGET alone
+# (e.g. for a slower host like Render's free tier) scales all three, instead
+# of requiring 4 separate env vars kept in sync by hand — a real bug we hit
+# live (Render stayed on old absolute defaults after the per-page budget was
+# raised, and the crawl kept bailing out after the first page). Fractions
+# chosen to reproduce the original hardcoded defaults exactly at the 25s
+# default budget (12000ms / 20s / 20s) — no behavior change until the budget
+# is tuned away from 25.
+_PAGE_BUDGET_SECONDS = float(os.environ.get("SCAN_SECONDS_PER_PAGE_BUDGET", "25"))
+
+# Playwright's own default navigation timeout is 30000ms — too long relative
+# to a page's share of the scan time budget: one dead/slow page could burn
+# more wall-clock than its whole nominal per-page budget. Leaves headroom
+# under that for routing/flow-walk work on the same page while still
+# tolerating legitimately slow-but-real sites.
+NAV_TIMEOUT_MS = int(_PAGE_BUDGET_SECONDS * 0.48 * 1000)
 
 # NAV_TIMEOUT_MS only bounds the initial page.goto() — none of
 # _snapshot_page's own Playwright calls (page.content(), screenshot(), the
@@ -38,17 +51,16 @@ NAV_TIMEOUT_MS = int(os.environ.get("NAV_TIMEOUT_MS", "12000"))
 # subscription"-shaped click on a real e-commerce site's footer link).
 # _snapshot_page is the one function every "read the page now" call in the
 # crawl pipeline routes through, so bounding it there covers all callers.
-SNAPSHOT_TIMEOUT_SECONDS = int(os.environ.get("SNAPSHOT_TIMEOUT_SECONDS", "20"))
+SNAPSHOT_TIMEOUT_SECONDS = int(_PAGE_BUDGET_SECONDS * 0.8)
 
-# apply_consent_rules iterates up to 206 vendored rule files and some of its
-# per-rule Playwright calls (_detect_cookie_wall's page.evaluate()) have no
-# timeout of their own — Page.evaluate() doesn't even accept a timeout
-# parameter. A stalled page can hang that forever with no exception to
-# catch, confirmed against a live site (amazon.de, verbraucherzentrale.de
-# both got stuck at 0 pages crawled). Bounded here like SNAPSHOT_TIMEOUT_
-# SECONDS above, comfortably under SCAN_SECONDS_PER_PAGE_BUDGET (25s,
-# site_crawler.py) so a timeout still leaves room for the rest of the page.
-CONSENT_TIMEOUT_SECONDS = int(os.environ.get("CONSENT_TIMEOUT_SECONDS", "20"))
+# apply_consent_rules iterates up to 206 vendored rule files (fast, pure
+# selector matching) — confirmed live to get stuck at 0 pages crawled on
+# amazon.de/verbraucherzentrale.de instead via _detect_cookie_wall's single
+# page.evaluate() call, which has no timeout of its own (see that function's
+# own asyncio.wait_for wrapper for the real fix to that specific hang).
+# Bounded here like SNAPSHOT_TIMEOUT_SECONDS above so a stalled page still
+# leaves room for the rest of the page's processing.
+CONSENT_TIMEOUT_SECONDS = int(_PAGE_BUDGET_SECONDS * 0.8)
 
 # Best-effort keywords for identifying a "reject/decline all" click target when
 # a Consent-O-Matic rule doesn't carry an explicit reject hint.
