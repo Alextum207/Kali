@@ -345,11 +345,20 @@ async def _detect_cookie_wall(page) -> bool:
     banner itself has no reject button, regardless of whether the rest of
     the page is still usable underneath it)."""
     try:
-        return await page.evaluate(
-            "() => getComputedStyle(document.body).overflow === 'hidden' "
-            "|| getComputedStyle(document.documentElement).overflow === 'hidden'"
+        # page.evaluate() takes no timeout of its own (see the module-level
+        # CONSENT_TIMEOUT_SECONDS comment above) — a stalled page can hang
+        # this one call forever and burn the whole per-page consent budget
+        # on it alone. 5s is comfortably under CONSENT_TIMEOUT_SECONDS so a
+        # timeout here still leaves headroom for the rest of consent
+        # handling on the same page.
+        return await asyncio.wait_for(
+            page.evaluate(
+                "() => getComputedStyle(document.body).overflow === 'hidden' "
+                "|| getComputedStyle(document.documentElement).overflow === 'hidden'"
+            ),
+            timeout=5,
         )
-    except Exception as exc:  # noqa: BLE001 - deliberate broad catch, page state can vary
+    except Exception as exc:  # noqa: BLE001 - deliberate broad catch, page state can vary (incl. asyncio.TimeoutError)
         logger.debug("_detect_cookie_wall: check failed: %s", exc)
         return False
 

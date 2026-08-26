@@ -505,6 +505,21 @@ async def test_detect_cookie_wall_false_for_normal_scrollable_page():
 
 
 @pytest.mark.asyncio
+async def test_detect_cookie_wall_times_out_instead_of_hanging_forever():
+    """Regression: page.evaluate() has no timeout of its own — a stalled
+    page (confirmed live against amazon.de/verbraucherzentrale.de) used to
+    hang this check forever, burning the whole per-page
+    CONSENT_TIMEOUT_SECONDS budget on one call. Must fail fast instead."""
+
+    class _HangingPage:
+        async def evaluate(self, _script):
+            await asyncio.sleep(3600)  # never resolves within the test
+
+    detected = await asyncio.wait_for(_detect_cookie_wall(_HangingPage()), timeout=6)
+    assert detected is False
+
+
+@pytest.mark.asyncio
 async def test_apply_consent_rules_distinguishes_cookie_wall_from_missing_reject(tmp_path):
     """The two signals must stay separate: a banner with no reject option
     on an otherwise-normal page is `reject_option_missing` only; a banner
