@@ -40,7 +40,10 @@ EVIDENCE_DIR = os.environ.get("EVIDENCE_DIR", "./data/evidence")
 # in app/analysis/llm_classify.py. None here means local dev/CI without the
 # key keeps working exactly as before (category/interaction LLM steps no-op).
 _LLM_CLIENT = (
-    anthropic.AsyncAnthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+    # timeout=30: SDK default is ~600s, far longer than the 12s/20s/25s
+    # timeout discipline everywhere else in the crawl path — an unbounded
+    # LLM call would look indistinguishable from a hung crawl.
+    anthropic.AsyncAnthropic(api_key=os.environ["ANTHROPIC_API_KEY"], timeout=30.0)
     if os.environ.get("ANTHROPIC_API_KEY")
     else None
 )
@@ -212,8 +215,9 @@ async def _run_scan_background(scan_id: int, url: str, max_pages: int | None, br
                 "(Disallow) — Scan sofort abgebrochen, keine Seite wurde besucht."
             ),
         )
-    except Exception:
-        mark_scan_status(bg_conn, scan_id, "error")
+    except Exception as exc:
+        logger.exception("scan %s failed", scan_id)
+        mark_scan_status(bg_conn, scan_id, "error", message=str(exc) or type(exc).__name__)
     finally:
         bg_conn.close()
 
@@ -228,18 +232,19 @@ def _start_scan(
     """Shared by the form-post (HTML) and JSON scan-start routes: normalize,
     validate, insert the scan row, and schedule the background crawl."""
     url = url.strip()
-    if url and urllib.parse.urlsplit(url).scheme not in ("http", "https"):
+    if url and "://" not in url:
         # Root cause of "Scan starten hängt": the dashboard's URL field used
         # to be <input type="url">, which the browser silently refuses to
         # submit without a scheme (e.g. "example.com") — no error, just
         # nothing happens. Field is now plain text; normalize here so a
-        # bare host works. Checking "scheme not in {http,https}" rather than
-        # "not scheme": urlsplit("localhost:8000").scheme == "localhost" per
+        # bare host works. Checking for "://" rather than parsing the scheme
+        # with urlsplit: urlsplit("localhost:8000").scheme == "localhost" per
         # RFC 3986 grammar (no "//" required for a scheme), so a bare
-        # "host:port" input would otherwise slip past a falsy-scheme check
-        # unnormalized and hit validate_scan_url's confusing scheme-rejected
-        # error instead of being treated as a host to prepend https:// to.
-        # bare domain still works instead of failing validate_scan_url.
+        # "host:port" input would otherwise slip past a scheme check
+        # unnormalized. "://" also correctly leaves any URL with an explicit
+        # scheme (including a disallowed one like "file://...") untouched,
+        # so it hits validate_scan_url's clear rejection instead of being
+        # mangled into "https://file:///..." (bogus hostname "file").
         url = f"https://{url}"
     try:
         validate_scan_url(url)
