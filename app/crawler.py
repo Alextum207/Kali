@@ -21,11 +21,12 @@ DEFAULT_CONSENT_RULES_DIR = str(
 )
 
 # Playwright's own default navigation timeout is 30000ms — too long
-# relative to SCAN_TIME_BUDGET_SECONDS (25s default in site_crawler.py):
-# one dead/slow page could burn more wall-clock than the whole scan's
-# nominal budget. 12s leaves headroom under the 25s budget for routing/
-# flow-walk work on the same page while still tolerating legitimately
-# slow-but-real sites.
+# relative to a page's share of the scan time budget
+# (SCAN_SECONDS_PER_PAGE_BUDGET, 25s default in site_crawler.py): one
+# dead/slow page could burn more wall-clock than its whole nominal
+# per-page budget. 12s leaves headroom under that for routing/flow-walk
+# work on the same page while still tolerating legitimately slow-but-real
+# sites.
 NAV_TIMEOUT_MS = int(os.environ.get("NAV_TIMEOUT_MS", "12000"))
 
 # NAV_TIMEOUT_MS only bounds the initial page.goto() — none of
@@ -38,6 +39,16 @@ NAV_TIMEOUT_MS = int(os.environ.get("NAV_TIMEOUT_MS", "12000"))
 # _snapshot_page is the one function every "read the page now" call in the
 # crawl pipeline routes through, so bounding it there covers all callers.
 SNAPSHOT_TIMEOUT_SECONDS = int(os.environ.get("SNAPSHOT_TIMEOUT_SECONDS", "20"))
+
+# apply_consent_rules iterates up to 206 vendored rule files and some of its
+# per-rule Playwright calls (_detect_cookie_wall's page.evaluate()) have no
+# timeout of their own — Page.evaluate() doesn't even accept a timeout
+# parameter. A stalled page can hang that forever with no exception to
+# catch, confirmed against a live site (amazon.de, verbraucherzentrale.de
+# both got stuck at 0 pages crawled). Bounded here like SNAPSHOT_TIMEOUT_
+# SECONDS above, comfortably under SCAN_SECONDS_PER_PAGE_BUDGET (25s,
+# site_crawler.py) so a timeout still leaves room for the rest of the page.
+CONSENT_TIMEOUT_SECONDS = int(os.environ.get("CONSENT_TIMEOUT_SECONDS", "20"))
 
 # Best-effort keywords for identifying a "reject/decline all" click target when
 # a Consent-O-Matic rule doesn't carry an explicit reject hint.
@@ -73,6 +84,22 @@ _ACCEPT_KEYWORDS = (
     "einverstanden",
 )
 
+_COOKIE_CONTEXT_KEYWORDS = (
+    "cookie",
+    "cookies",
+    "consent",
+    "privacy",
+    "datenschutz",
+    "einwilligung",
+    "zustimmung",
+    "akzeptieren",
+    "ablehnen",
+    "accept all",
+    "reject all",
+)
+
+_COOKIE_CONTROL_SELECTOR = "button, a, [role=button], input[type=button], input[type=submit]"
+
 LEGAL_TEXT_KEYWORDS = (
     "kündigung",
     "widerruf",
@@ -89,6 +116,34 @@ LEGAL_TEXT_KEYWORDS = (
     "widerspruch",
 )
 
+_LOW_CONTRAST_STRONG_LEGAL_PATTERN = re.compile(
+    r"\b(?:"
+    r"k.ndigung|kundigung|kuendigung|widerruf\w*|geb.hr\w*|gebuehr\w*|"
+    r"vertragslaufzeit|agb|schiedsgericht|laufzeit|datenschutz|r.cktritt|ruecktritt|"
+    r"haftung|widerspruch|einwilligung|zustimmung|privacy|terms|cancellation|withdrawal|liability"
+    r")\b",
+    re.IGNORECASE,
+)
+_LOW_CONTRAST_PRICE_OR_COST_PATTERN = re.compile(
+    r"\b(?:"
+    r"gesamtpreis|endpreis|zusatzkosten|versandkosten|servicegeb.hr\w*|servicegebuehr\w*|"
+    r"bearbeitungsgeb.hr\w*|bearbeitungsgebuehr\w*|kostenpflichtig|zahlungspflichtig|"
+    r"fees?|total price|shipping costs|service charge"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def _looks_like_low_contrast_legal_text(text: str) -> bool:
+    text_lower = text.lower()
+    has_price_or_cost_context = bool(_LOW_CONTRAST_PRICE_OR_COST_PATTERN.search(text_lower))
+    if has_price_or_cost_context:
+        return True
+    if not _LOW_CONTRAST_STRONG_LEGAL_PATTERN.search(text_lower):
+        return False
+    word_count = len(re.findall(r"[A-Za-zÀ-ÿ]+", text))
+    return word_count >= 3
+
 
 async def _read_style(page, selector: str) -> dict | None:
     # ponytail: eval_on_selector raises (not None-returns) when no element
@@ -102,7 +157,10 @@ async def _read_style(page, selector: str) -> dict | None:
                 const rect = el.getBoundingClientRect();
                 const style = getComputedStyle(el);
                 const parseRgb = (s) => {
-                    const m = s.match(/\\d+/g);
+                    const m = s.match(/[\\d.]+/g);
+                    if (m && m.length >= 4 && Number(m[3]) === 0) {
+                        return [255, 255, 255];
+                    }
                     return m ? [parseInt(m[0]), parseInt(m[1]), parseInt(m[2])] : [0, 0, 0];
                 };
                 return {
@@ -158,6 +216,32 @@ def _looks_like_accept(hint) -> bool:
     texts = hint if isinstance(hint, list) else [hint]
     joined = " ".join(str(t) for t in texts).lower()
     return any(kw in joined for kw in _ACCEPT_KEYWORDS)
+
+
+async def _banner_has_cookie_context(page, selector: str) -> bool:
+    try:
+        text = await page.locator(selector).first.inner_text(timeout=750)
+    except Exception as exc:  # noqa: BLE001 - unexpected selector/page state
+        logger.debug("_banner_has_cookie_context: failed for %r: %s", selector, exc)
+        return False
+    text_lower = text.lower()
+    return any(kw in text_lower for kw in _COOKIE_CONTEXT_KEYWORDS)
+
+
+async def _has_visible_keyword_control(page, container_selector: str, keywords: tuple[str, ...]) -> bool:
+    try:
+        controls = await page.locator(container_selector).first.locator(_COOKIE_CONTROL_SELECTOR).all()
+    except Exception as exc:  # noqa: BLE001 - unexpected selector/page state
+        logger.debug("_has_visible_keyword_control: failed for %r: %s", container_selector, exc)
+        return False
+    for control in controls:
+        try:
+            text = ((await control.inner_text(timeout=500)) or (await control.get_attribute("value") or "")).lower()
+            if any(kw in text for kw in keywords) and await control.is_visible():
+                return True
+        except Exception:
+            continue
+    return False
 
 
 def _has_consent_toggle(node) -> bool:
@@ -271,6 +355,23 @@ async def _detect_cookie_wall(page) -> bool:
 
 
 async def apply_consent_rules(page, rules_dir: str = DEFAULT_CONSENT_RULES_DIR) -> dict:
+    """Thin timeout wrapper around `_apply_consent_rules_impl` — see
+    CONSENT_TIMEOUT_SECONDS above for why. Falls back to the same default
+    "nothing found" result the impl itself returns on any other failure."""
+    try:
+        return await asyncio.wait_for(
+            _apply_consent_rules_impl(page, rules_dir), timeout=CONSENT_TIMEOUT_SECONDS
+        )
+    except asyncio.TimeoutError:
+        logger.warning("apply_consent_rules: timed out after %ss", CONSENT_TIMEOUT_SECONDS)
+        return {
+            "accept_style": None, "reject_style": None,
+            "reject_option_missing": False, "cookie_wall_detected": False,
+            "banner_screenshot": None,
+        }
+
+
+async def _apply_consent_rules_impl(page, rules_dir: str = DEFAULT_CONSENT_RULES_DIR) -> dict:
     """Best-effort cookie-banner rejection using vendored Consent-O-Matic rules,
     plus (for whichever rule's banner is actually detected present on the
     page) capturing real accept/reject button styles for button-asymmetry
@@ -313,6 +414,10 @@ async def apply_consent_rules(page, rules_dir: str = DEFAULT_CONSENT_RULES_DIR) 
 
             present = await _matches_present_detector(page, data)
             if present is None:
+                continue
+            _, present_selector = present
+            if not await _banner_has_cookie_context(page, present_selector):
+                logger.debug("apply_consent_rules: skipping non-consent-looking banner %r", present_selector)
                 continue
 
             if result["banner_screenshot"] is None:
@@ -357,6 +462,11 @@ async def apply_consent_rules(page, rules_dir: str = DEFAULT_CONSENT_RULES_DIR) 
                     except Exception as exc:
                         logger.debug("apply_consent_rules: selector %r failed: %s", selector, exc)
 
+            if not found_reject_candidate:
+                found_reject_candidate = await _has_visible_keyword_control(
+                    page, present_selector, _REJECT_KEYWORDS
+                )
+
             if not found_reject_candidate and not _has_consent_toggle(data):
                 result["reject_option_missing"] = True
 
@@ -382,6 +492,7 @@ async def apply_consent_rules(page, rules_dir: str = DEFAULT_CONSENT_RULES_DIR) 
                         continue
                     await el.click(timeout=1000)
                     clicked_reject = True
+                    result["reject_option_missing"] = False
                     logger.info("apply_consent_rules: clicked generic fallback reject %r", text.strip()[:50])
                     break
             except Exception as exc:  # noqa: BLE001 - deliberate broad catch, page state can vary
@@ -621,7 +732,13 @@ async def verify_countdown_reset(page, findings: list[dict], browser=None) -> li
 
 
 _CAPTCHA_MARKERS = (
-    "recaptcha", "hcaptcha", "h-captcha", "turnstile", "challenges.cloudflare.com",
+    # Widget markup / actual challenge endpoints only — NOT a bare "recaptcha"/
+    # "hcaptcha" substring, which also matches the loader script platforms like
+    # Weebly/Wix preload on every page for a dormant contact-form widget (see
+    # be-gipsy.de false positive: `_W.recaptchaUrl = ".../recaptcha/api.js"`
+    # present with no visible captcha anywhere on the page).
+    "g-recaptcha", "recaptcha/api2/anchor", "h-captcha", "cf-turnstile",
+    "challenges.cloudflare.com",
     "verify you are human", "bestätigen sie, dass sie kein roboter",
     "i'm not a robot", "ich bin kein roboter", "checking your browser",
 )
@@ -714,8 +831,12 @@ async def find_low_contrast_legal_text(page) -> list[dict]:
                 .filter(el => el.children.length === 0 && el.textContent.trim().length > 0)
                 .map(el => {
                     const style = getComputedStyle(el);
+                    const rect = el.getBoundingClientRect();
                     const parseRgb = (s) => {
-                        const m = s.match(/\\d+/g);
+                        const m = s.match(/[\\d.]+/g);
+                        if (m && m.length >= 4 && Number(m[3]) === 0) {
+                            return [255, 255, 255];
+                        }
                         return m ? [parseInt(m[0]), parseInt(m[1]), parseInt(m[2])] : [255, 255, 255];
                     };
                     return {
@@ -724,8 +845,16 @@ async def find_low_contrast_legal_text(page) -> list[dict]:
                         font_size: parseFloat(style.fontSize),
                         color: parseRgb(style.color),
                         bg_color: parseRgb(style.backgroundColor),
+                        visible: (
+                            rect.width > 0 &&
+                            rect.height > 0 &&
+                            style.display !== 'none' &&
+                            style.visibility !== 'hidden' &&
+                            Number(style.opacity) !== 0
+                        ),
                     };
-                })""",
+                })
+                .filter(el => el.visible)""",
         )
     except Exception as exc:  # noqa: BLE001 - deliberate broad catch, page state can vary
         logger.debug("find_low_contrast_legal_text: eval failed: %s", exc)
@@ -747,10 +876,16 @@ async def find_low_contrast_legal_text(page) -> list[dict]:
 
     findings = []
     for e, c in zip(elements, contrasts):
-        text_lower = e["text"].lower()
-        if not any(kw in text_lower for kw in LEGAL_TEXT_KEYWORDS):
+        if not _looks_like_low_contrast_legal_text(e["text"]):
             continue
-        camouflaged = c < median_contrast * 0.6 or (e["font_size"] and e["font_size"] < median_font * 0.75)
+        font_small = bool(e["font_size"] and e["font_size"] < median_font * 0.75)
+        low_relative_contrast = c < median_contrast * 0.6
+        low_absolute_contrast = c < 3.0
+        camouflaged = (
+            low_relative_contrast and c < 4.5
+        ) or (
+            font_small and low_absolute_contrast and c < median_contrast * 0.9
+        )
         if camouflaged:
             findings.append(
                 {

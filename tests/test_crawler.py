@@ -48,6 +48,18 @@ def test_looks_like_captcha_returns_false_for_normal_page():
     dom = "<html><body><h1>Willkommen im Shop</h1><p>Produkte hier.</p></body></html>"
     assert _looks_like_captcha(dom) is False
 
+
+def test_looks_like_captcha_ignores_dormant_recaptcha_loader_script():
+    # Regression: be-gipsy.de (Weebly) preloads this on every page for a
+    # contact-form widget that's never rendered — no captcha ever shown.
+    dom = '<html><head><script>_W.recaptchaUrl = "https://www.google.com/recaptcha/api.js";</script></head><body><h1>Shop</h1></body></html>'
+    assert _looks_like_captcha(dom) is False
+
+
+def test_looks_like_captcha_detects_turnstile():
+    dom = '<html><body><div class="cf-turnstile" data-sitekey="x"></div></body></html>'
+    assert _looks_like_captcha(dom) is True
+
 FIXTURE_URL = pathlib.Path(__file__).parent.joinpath("fixtures/sample_page.html").as_uri()
 CAMOUFLAGE_FIXTURE_URL = pathlib.Path(__file__).parent.joinpath(
     "fixtures/camouflaged_text_page.html"
@@ -205,6 +217,117 @@ async def test_find_low_contrast_legal_text_flags_camouflaged_clause():
     assert len(findings) == 1
     assert findings[0]["pattern_type"] == "Visuelle Tarnung (Kontrast)"
     assert "kündigung" in findings[0]["evidence_data"]["excerpt"].lower()
+
+
+@pytest.mark.asyncio
+async def test_find_low_contrast_legal_text_ignores_promotional_price_copy():
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        page = await browser.new_page()
+        await page.set_content("""
+            <main>
+              <h1 style="color:#111;background:#fff">Shop</h1>
+              <p style="color:#111;background:#fff">Normale Produktbeschreibung</p>
+              <span style="color:#fff;background:#fff">Preishits auf CD</span>
+              <span style="color:#fff;background:#fff">Preiswerte Empfehlungen</span>
+              <span style="color:#fff;background:#fff">tolino eReader zum Aktionspreis</span>
+            </main>
+        """)
+        findings = await find_low_contrast_legal_text(page)
+        await browser.close()
+
+    assert findings == []
+
+
+@pytest.mark.asyncio
+async def test_find_low_contrast_legal_text_ignores_small_but_readable_legal_link():
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        page = await browser.new_page()
+        await page.set_content("""
+            <main>
+              <h1 style="color:#777;background:#fff">Pricing</h1>
+              <a style="font-size:10px;color:#000;background:#fff">Privacy Policy</a>
+            </main>
+        """)
+        findings = await find_low_contrast_legal_text(page)
+        await browser.close()
+
+    assert findings == []
+
+
+@pytest.mark.asyncio
+async def test_find_low_contrast_legal_text_ignores_short_legal_navigation_links():
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        page = await browser.new_page()
+        await page.set_content("""
+            <main>
+              <h1 style="color:#111;background:#fff">Docs</h1>
+              <a style="color:#eee;background:#fff">Privacy</a>
+              <a style="color:#eee;background:#fff">Terms</a>
+              <a style="color:#eee;background:#fff">AGB</a>
+            </main>
+        """)
+        findings = await find_low_contrast_legal_text(page)
+        await browser.close()
+
+    assert findings == []
+
+
+@pytest.mark.asyncio
+async def test_find_low_contrast_legal_text_does_not_match_fee_inside_words():
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        page = await browser.new_page()
+        await page.set_content("""
+            <main>
+              <h1 style="color:#111;background:#fff">Documentation</h1>
+              <a style="color:#eee;background:#fff">Feed exports</a>
+              <span style="color:#eee;background:#fff">5 free projects are included</span>
+            </main>
+        """)
+        findings = await find_low_contrast_legal_text(page)
+        await browser.close()
+
+    assert findings == []
+
+
+@pytest.mark.asyncio
+async def test_find_low_contrast_legal_text_ignores_hidden_elements():
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        page = await browser.new_page()
+        await page.set_content("""
+            <main>
+              <h1 style="color:#111;background:#fff">Checkout</h1>
+              <p style="display:none;color:#fff;background:#fff">Kündigung nur schriftlich möglich.</p>
+              <p style="visibility:hidden;color:#fff;background:#fff">Gesamtpreis zzgl. Servicegebühr.</p>
+            </main>
+        """)
+        findings = await find_low_contrast_legal_text(page)
+        await browser.close()
+
+    assert findings == []
+
+
+@pytest.mark.asyncio
+async def test_find_low_contrast_legal_text_flags_hidden_cost_notice():
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        page = await browser.new_page()
+        await page.set_content("""
+            <main>
+              <h1 style="color:#111;background:#fff">Checkout</h1>
+              <p style="color:#111;background:#fff">Sichtbarer Bestellhinweis</p>
+              <p style="font-size:8px;color:#fff;background:#fff">Gesamtpreis zzgl. Versandkosten und Servicegebühr.</p>
+            </main>
+        """)
+        findings = await find_low_contrast_legal_text(page)
+        await browser.close()
+
+    assert len(findings) == 1
+    assert "versandkosten" in findings[0]["evidence_data"]["excerpt"].lower()
 
 
 @pytest.mark.asyncio
