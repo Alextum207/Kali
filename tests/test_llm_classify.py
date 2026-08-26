@@ -123,3 +123,25 @@ async def test_classify_text_returns_empty_list_after_two_failed_attempts():
     findings = await classify_text("some text", client=client)
     assert findings == []
     assert client.messages.calls == 2
+
+
+@pytest.mark.asyncio
+async def test_classify_text_drops_out_of_enum_pattern_type():
+    """Regression: live be-gipsy.de scan got a "Fake Urgency" finding from
+    classify_text on "seit 2o1o" (a founding-year mention) even though
+    "Fake Urgency" was moved to regex_classify.py and isn't in PATTERN_TYPES
+    any more — the tool-schema enum steers the model but isn't a hard
+    server-side validation, so a stray out-of-enum type must be filtered
+    out here instead of stored as a real finding."""
+    content = [
+        _tool_use_block(
+            [
+                {"pattern_type": "Fake Urgency", "confidence_score": 0.85, "quote": "2o1o "},
+                {"pattern_type": "Nagging", "confidence_score": 0.6, "quote": "Jetzt upgraden!"},
+            ]
+        )
+    ]
+    client = _FakeClient(content=content)
+    findings = await classify_text("seit 2o1o ... Jetzt upgraden!", client=client)
+    assert len(findings) == 1
+    assert findings[0]["pattern_type"] == "Nagging"

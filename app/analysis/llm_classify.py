@@ -76,14 +76,25 @@ def _extract_findings(response) -> list[dict]:
     for block in response.content:
         if block.type == "tool_use" and block.name == "report_findings":
             items = block.input.get("findings", [])
-            return [
-                {
+            findings = []
+            for item in items:
+                # Tool-schema enum is a strong steer, not a hard server-side
+                # validation — the model can still emit a type outside
+                # PATTERN_TYPES (seen live: "Fake Urgency", which was moved
+                # to regex_classify.py and dropped from this enum). Drop
+                # instead of storing an unvetted category as a legal finding.
+                if item["pattern_type"] not in PATTERN_TYPES:
+                    logger.warning(
+                        "classify_text: dropping out-of-enum pattern_type %r (quote: %r)",
+                        item["pattern_type"], item.get("quote"),
+                    )
+                    continue
+                findings.append({
                     "pattern_type": item["pattern_type"],
                     "confidence_score": max(0.0, min(1.0, float(item["confidence_score"]))),
                     "evidence_data": {"quote": item["quote"]},
-                }
-                for item in items
-            ]
+                })
+            return findings
     raise ValueError("no report_findings tool_use block in response")
 
 
@@ -91,7 +102,9 @@ async def classify_text(text: str, client=None) -> list[dict]:
     if not text.strip():
         return []
     if client is None:
-        client = anthropic.AsyncAnthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+        # timeout=30: see app/main.py::_LLM_CLIENT for why (SDK default
+        # ~600s is far longer than this codebase's crawl-timeout discipline).
+        client = anthropic.AsyncAnthropic(api_key=os.environ["ANTHROPIC_API_KEY"], timeout=30.0)
 
     system_prompt = _build_system_prompt()
     for attempt in range(2):
