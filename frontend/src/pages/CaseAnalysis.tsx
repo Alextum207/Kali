@@ -30,6 +30,7 @@ const scanSteps = [
 
 const CaseAnalysis = () => {
   const [url, setUrl] = useState("");
+  const [maxPages, setMaxPages] = useState(5);
   const [scanId, setScanId] = useState<number | null>(null);
   const [scan, setScan] = useState<Scan | null>(null);
   const [findings, setFindings] = useState<Finding[]>([]);
@@ -79,7 +80,7 @@ const CaseAnalysis = () => {
     setScan(null);
     setFindings([]);
     try {
-      const { scan_id } = await postScan(url.trim());
+      const { scan_id } = await postScan(url.trim(), maxPages);
       setScanId(scan_id);
     } catch (err) {
       setError((err as Error).message);
@@ -110,6 +111,15 @@ const CaseAnalysis = () => {
               onChange={(e) => setUrl(e.target.value)}
               placeholder="https://example.com"
               className="flex-1 rounded-lg border border-border bg-background px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+            />
+            <input
+              type="number"
+              min={1}
+              max={30}
+              value={maxPages}
+              onChange={(e) => setMaxPages(Number(e.target.value))}
+              title="Max. Seitenzahl"
+              className="w-20 rounded-lg border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
             />
             <button
               type="submit"
