@@ -414,12 +414,6 @@ def page_detail(request: Request, scan_id: int, page_id: int, conn: sqlite3.Conn
 
 @app.get("/scans/{scan_id}/report.pdf")
 def scan_report(scan_id: int, conn: sqlite3.Connection = Depends(_get_conn)):
-    # Imported here, not at module level: WeasyPrint (pulled in by
-    # app.reports) requires native GTK libraries that aren't installed on
-    # every dev machine (e.g. Windows without GTK) — importing it eagerly
-    # would crash the whole app at startup just to serve the dashboard.
-    from app.reports import generate_pdf_report
-
     scan = get_scan(conn, scan_id)
     if scan is None:
         raise HTTPException(status_code=404, detail="Scan not found")
@@ -427,6 +421,16 @@ def scan_report(scan_id: int, conn: sqlite3.Connection = Depends(_get_conn)):
     findings = _attach_display_fields(get_findings(conn, scan_id), pages, scan["url"])
     out_path = os.path.join(EVIDENCE_DIR, f"scan_{scan_id}_report.pdf")
     try:
+        # Imported here, not at module level: WeasyPrint (pulled in by
+        # app.reports) requires native GTK libraries that aren't installed
+        # on every dev machine (e.g. Windows without GTK) — importing it
+        # eagerly would crash the whole app at startup just to serve the
+        # dashboard. Import happens INSIDE this try, not before it — WeasyPrint
+        # fails at import time (not call time) when GTK is missing, so an
+        # import-outside-try left this whole fallback unreachable (raw 500
+        # instead of the HTML fallback below — confirmed live on Windows
+        # without GTK).
+        from app.reports import generate_pdf_report
         generate_pdf_report(scan["url"], findings, out_path)
     except Exception as exc:  # noqa: BLE001 - deliberate broad catch, see below
         # Best-effort fallback: WeasyPrint needs native GTK libraries that

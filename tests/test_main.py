@@ -191,6 +191,44 @@ def test_scan_report_falls_back_to_html_when_pdf_generation_fails(tmp_path, monk
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
     assert "PDF-Engine nicht verfügbar" in response.text
+
+
+def test_scan_report_falls_back_to_html_when_reports_import_fails(tmp_path, monkeypatch):
+    """Regression: the sibling test above mocks generate_pdf_report AFTER
+    app.reports already imported successfully (conftest.py's WeasyPrint
+    stub makes that import always succeed in tests) -- it never exercised
+    the real-world failure mode, where WeasyPrint's native GTK dependency
+    fails at IMPORT time on a machine without GTK (confirmed live on
+    Windows). scan_report used to do `from app.reports import
+    generate_pdf_report` OUTSIDE its try/except, so that import failure
+    raised a raw 500 instead of reaching the HTML fallback. Simulates an
+    import failure directly via sys.modules, independent of whatever
+    WeasyPrint mock conftest.py provides."""
+    import sys
+
+    monkeypatch.setattr(main_module, "DB_PATH", str(tmp_path / "test.db"))
+    monkeypatch.setattr(main_module, "EVIDENCE_DIR", str(tmp_path / "evidence"))
+    # A None entry in sys.modules forces Python's import system to raise
+    # ImportError for that module, simulating "app.reports fails to import"
+    # without needing a real GTK-less environment.
+    monkeypatch.setitem(sys.modules, "app.reports", None)
+
+    from app.db import init_db, insert_scan, insert_finding
+
+    conn = init_db(str(tmp_path / "test.db"))
+    scan_id = insert_scan(conn, "https://example.com")
+    insert_finding(conn, scan_id, {
+        "pattern_type": "Confirm Shaming", "target_norm": "Art. 25 DSA",
+        "confidence_score": 0.9, "evidence_data": {"quote": "No thanks"},
+    })
+    conn.close()
+
+    with TestClient(main_module.app) as client:
+        response = client.get(f"/scans/{scan_id}/report.pdf")
+
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]
+    assert "PDF-Engine nicht verfügbar" in response.text
     assert "Confirm Shaming" in response.text
 
 
