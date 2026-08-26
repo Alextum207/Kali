@@ -76,6 +76,12 @@ def _extract_findings(response) -> list[dict]:
     for block in response.content:
         if block.type == "tool_use" and block.name == "report_findings":
             items = block.input.get("findings", [])
+            # ponytail: temporary unconditional diagnostic (remove once the
+            # live "Fake Urgency" mystery is settled) — logs exactly what the
+            # model returned before any filtering, so a live log grep proves
+            # whether this code path is even reached and what raw pattern_type
+            # values it's producing.
+            logger.warning("classify_text: raw model items: %r", items)
             findings = []
             for item in items:
                 # Tool-schema enum is a strong steer, not a hard server-side
