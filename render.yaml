@@ -9,6 +9,8 @@ services:
         sync: false # set manually in the Render dashboard, not committed
       - key: LEGAL_TEXT_MCP_BASE_URL
         value: http://localhost:8091 # optional side-service, not deployed here — compliance.py degrades gracefully if unreachable
+      - key: FRONTEND_ORIGIN
+        sync: false # set manually once the static site below has a URL (chicken-and-egg: unknown at first deploy) — CORSMiddleware in app/main.py reads this
     # Free plan has no persistent disk: /var/data resets on every restart/
     # redeploy (fine for demo purposes). To keep scan history across
     # restarts, switch `plan` to `starter` and uncomment the disk below —
@@ -17,3 +19,24 @@ services:
     #   name: kali-data
     #   mountPath: /var/data
     #   sizeGB: 1
+
+  # React/Vite frontend (frontend/) — separate static site so the existing
+  # Docker web service above stays a pure JSON API. Talks to it via
+  # VITE_API_BASE_URL (frontend/src/lib/api.ts), which is baked in at build
+  # time (Vite env vars aren't readable at runtime in a static build).
+  - type: web
+    name: kali-frontend
+    env: static
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    envVars:
+      - key: VITE_API_BASE_URL
+        value: https://kali-dark-pattern-monitor.onrender.com
+    routes:
+      # react-router-dom's BrowserRouter (frontend/src/App.tsx) needs every
+      # path rewritten to index.html, otherwise a reload on e.g. /dashboard
+      # 404s at Render's edge instead of reaching the client-side router.
+      - type: rewrite
+        source: /*
+        destination: /index.html
