@@ -911,7 +911,11 @@ async def find_low_contrast_legal_text(page) -> list[dict]:
             findings.append(
                 {
                     "pattern_type": "Visuelle Tarnung (Kontrast)",
-                    "confidence_score": 0.6,
+                    # Below pipeline.MIN_CONFIDENCE on its own — a single
+                    # contrast measurement is a weak, generic signal; needs
+                    # the co-occurrence boost from another finding on the
+                    # same page to be reported.
+                    "confidence_score": 0.5,
                     "evidence_data": {
                         "selector": e["selector"],
                         "excerpt": e["text"],

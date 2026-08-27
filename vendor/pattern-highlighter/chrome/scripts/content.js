@@ -19,8 +19,42 @@ let constants;
  */
 let consent;
 
+/**
+ * Same dynamic-import story as `constants` — the sneaking-into-basket
+ * detection module (scripts/sneak_basket.js).
+ * @type {object} A module namespace object
+ */
+let sneakBasket;
+
+const countdownVerificationFramePrefix = "__kali_countdown_verify__";
+const countdownVerificationTimeoutMs = 7000;
+const countdownVerificationAdvanceMs = 6 * 60 * 60 * 1000;
+const countdownVerificationSettleMs = 1300;
+const countdownVerificationCache = new Map();
+const isCountdownVerificationFrame = typeof window.name === "string" &&
+    window.name.startsWith(countdownVerificationFramePrefix);
+
+// Same-origin third-party widget iframes (YouTube, Stripe, PayPal, social
+// share buttons) run this content script too (manifest.json's all_frames:
+// true) but shouldn't be scanned — a dark pattern there belongs to the
+// widget provider, not the site being audited. Cross-origin widget iframes
+// are already unreachable regardless (browser same-origin policy).
+// ponytail: static denylist, no wildcard pattern matching — extend if a new
+// provider shows up.
+const WIDGET_IFRAME_HOSTS = new Set([
+    "youtube.com", "www.youtube.com", "youtube-nocookie.com", "www.youtube-nocookie.com",
+    "stripe.com", "js.stripe.com", "checkout.stripe.com",
+    "paypal.com", "www.paypal.com",
+    "facebook.com", "www.facebook.com",
+    "twitter.com", "x.com",
+    "instagram.com", "www.instagram.com",
+]);
+const isWidgetIframe = window !== window.top && WIDGET_IFRAME_HOSTS.has(location.hostname);
+
 // Initialize the extension.
-initPatternHighlighter();
+if (!isCountdownVerificationFrame && !isWidgetIframe) {
+    initPatternHighlighter();
+}
 
 /**
  * Initialize the extension in the current tab: check the activation state
@@ -59,6 +93,9 @@ async function activateHighlighting() {
     }
     if (!consent) {
         consent = await import(await brw.runtime.getURL("scripts/consent.js"));
+    }
+    if (!sneakBasket) {
+        sneakBasket = await import(await brw.runtime.getURL("scripts/sneak_basket.js"));
     }
 
     // Check if the pattern configuration is valid.
@@ -150,44 +187,40 @@ async function patternHighlighting(waitForChanges = false) {
     // Stop monitoring changes on the page with the observer during the pattern identification process.
     observer.disconnect();
 
-    // Wait 2000 milliseconds for subsequent changes after the observer has detected a change.
+    // Wait briefly for subsequent changes after the observer has detected a change.
     if (waitForChanges === true) {
-        await new Promise(resolve => { setTimeout(resolve, 2000) });
+        await new Promise(resolve => { setTimeout(resolve, 500) });
     }
 
     // Add pattern highlighter IDs to every element on the page.
     addPhidForEveryElement(document.body);
 
-    // Create a copy of the DOM that can be modified afterwards.
-    let domCopyA = document.body.cloneNode(true);
-    // Remove unwanted elements from the DOM copy (e.g. audio, video and script elements).
-    removeBlacklistNodes(domCopyA);
-
-    // Wait about 1.5 seconds for changes to elements to occur.
-    // An example of an expected change is a countdown that counts down every second.
-    await new Promise(resolve => { setTimeout(resolve, 1536) });
-
-    // Add pattern highlighter IDs to every element on the page.
-    addPhidForEveryElement(document.body);
-
-    // Create a second copy of the DOM. This copy will reflect changes, if there were any.
-    let domCopyB = document.body.cloneNode(true);
-    // Remove unwanted elements from the second DOM copy.
-    removeBlacklistNodes(domCopyB);
+    // Create one copy of the DOM for mutation-safe traversal. Countdown
+    // detection no longer depends on a second delayed copy; it combines this
+    // current DOM with script/storage/cookie evidence in constants.js.
+    let domCopy = document.body.cloneNode(true);
+    removeBlacklistNodes(domCopy);
 
     // Reset all found patterns on the page before updating them afterwards.
     resetDetectedPatterns();
 
-    // Identify patterns within the DOM copies. As reference for the current state of the web page `domCopyB` is used.
-    // `domCopyA` is used as the previous state of the page to detect changes.
-    // If elements are identified as patterns, respective classes are added to them.
-    findPatternDeep(domCopyB, domCopyA);
+    // Identify patterns within the DOM copy and highlight matched non-countdown
+    // elements immediately. Countdown candidates are only marked after the
+    // hidden-frame clock verification below confirms that the offer persists.
+    const countdownCandidates = [];
+    findPatternDeep(domCopy, null, countdownCandidates);
 
-    // Destroy both DOM copies so that they can be removed from memory.
-    domCopyA.replaceChildren();
-    domCopyA = null;
-    domCopyB.replaceChildren();
-    domCopyB = null;
+    // Destroy the DOM copy so that it can be removed from memory.
+    domCopy.replaceChildren();
+    domCopy = null;
+
+    const confirmedCountdownCandidates = await verifyCountdownCandidatesInHiddenFrame(countdownCandidates);
+    for (const candidate of confirmedCountdownCandidates) {
+        const elem = getElementByPhid(document, candidate.phid);
+        if (elem) {
+            markDetectedElement(elem, candidate.pattern);
+        }
+    }
 
     // Cookie-banner asymmetry / missing-reject-option detection operates on
     // the LIVE document (not the cloned trees above) and tags its matched
@@ -202,6 +235,15 @@ async function patternHighlighting(waitForChanges = false) {
         await applyCookieBannerChecks();
     } catch (e) {
         console.error("Cookie-banner check failed:", e);
+    }
+
+    // Sneaking-into-basket detection (cross-page cart-baseline vs. checkout
+    // item count). Same best-effort contract as the cookie-banner checks
+    // above: a failure here must never kill the rest of the pipeline.
+    try {
+        await applySneakingIntoBasketChecks();
+    } catch (e) {
+        console.error("Sneaking-into-basket check failed:", e);
     }
 
     // Send the information about the detected patterns to the other extension scripts.
@@ -224,6 +266,34 @@ async function patternHighlighting(waitForChanges = false) {
 
     // Finally, unlock the function so that it can be executed again.
     this.lock = false;
+}
+
+/**
+ * Runs the sneaking-into-basket checks (scripts/sneak_basket.js): syncs the
+ * per-origin cart baseline from any visible cart badge, then — on checkout-
+ * looking pages — flags when the actual item count exceeds what the user
+ * tracked into their basket. Tags the order-summary element directly, same
+ * imperative style as applyCookieBannerChecks() above.
+ */
+async function applySneakingIntoBasketChecks() {
+    await sneakBasket.installAddToCartTracking();
+    // Skip the badge sync on checkout-looking pages: the checkout page's own
+    // cart badge already reflects whatever the shop put in the basket
+    // (including a sneaked-in extra), so syncing here would silently
+    // overwrite the honest pre-checkout baseline right before the
+    // comparison below reads it — defeating detection entirely.
+    if (!sneakBasket.looksLikeCheckoutPage()) {
+        await sneakBasket.syncBasketFromBadge();
+    }
+
+    const result = await sneakBasket.checkSneakingIntoBasket();
+    if (result && result.detected && result.tagEl) {
+        result.tagEl.classList.add(
+            constants.patternDetectedClassName,
+            constants.extensionClassPrefix + "sneaking-into-basket"
+        );
+        console.log("Sneaking-into-basket:", result.detail);
+    }
 }
 
 /**
@@ -252,11 +322,14 @@ async function applyCookieBannerChecks() {
         }
     }
 
-    if (result.rejectOptionMissing && result.presentSelector) {
+    if (result.rejectOptionMissing) {
         // Tag the banner container itself — there's no single "reject
         // button" element to tag when one is missing. Re-resolve via the
-        // presentMatcher selector already confirmed to match.
-        const bannerEl = document.querySelector(result.presentSelector);
+        // presentMatcher selector already confirmed to match, or use the
+        // generic-fallback container element directly when no vendored
+        // rule matched the banner at all (see consent.js's checkCookieBanner).
+        const bannerEl = result.genericBannerEl ||
+            (result.presentSelector && document.querySelector(result.presentSelector));
         if (bannerEl) {
             bannerEl.classList.add(
                 constants.patternDetectedClassName,
@@ -309,6 +382,194 @@ function removeBlacklistNodes(dom) {
     }
 }
 
+function cssEscape(value) {
+    if (typeof CSS !== "undefined" && typeof CSS.escape === "function") {
+        return CSS.escape(value);
+    }
+    return String(value).replace(/["\\#.;:[\]()>,+~*^$|=\s]/g, "\\$&");
+}
+
+function selectorForElement(elem) {
+    if (elem.id) {
+        return `#${cssEscape(elem.id)}`;
+    }
+
+    const parts = [];
+    let current = elem;
+    while (current && current.nodeType === Node.ELEMENT_NODE && current !== document.body && parts.length < 5) {
+        let part = current.tagName.toLowerCase();
+        if (typeof current.className === "string") {
+            const classes = current.className.trim().split(/\s+/).filter(Boolean).slice(0, 2);
+            if (classes.length > 0) {
+                part += "." + classes.map(cssEscape).join(".");
+            }
+        }
+        if (current.parentElement) {
+            const siblings = Array.from(current.parentElement.children)
+                .filter(sibling => sibling.tagName === current.tagName);
+            if (siblings.length > 1) {
+                part += `:nth-of-type(${siblings.indexOf(current) + 1})`;
+            }
+        }
+        parts.unshift(part);
+        current = current.parentElement;
+    }
+
+    return parts.length > 0 ? parts.join(" > ") : elem.tagName.toLowerCase();
+}
+
+function countdownCandidateFromElement(elem, pattern) {
+    return {
+        phid: elem.dataset.phid,
+        selector: selectorForElement(elem),
+        textBefore: elem.innerText || elem.textContent || "",
+        offerSignature: constants.countdownOfferSignature(elem),
+        signature: constants.countdownCandidateSignature(elem),
+        pattern,
+    };
+}
+
+function wait(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function withTimeout(promise, ms) {
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("countdown verification timed out")), ms);
+        promise.then(
+            value => {
+                clearTimeout(timer);
+                resolve(value);
+            },
+            error => {
+                clearTimeout(timer);
+                reject(error);
+            }
+        );
+    });
+}
+
+async function waitForFrameLoad(iframe) {
+    if (iframe.contentDocument && iframe.contentDocument.readyState !== "loading") {
+        return;
+    }
+    await new Promise((resolve, reject) => {
+        iframe.addEventListener("load", resolve, { once: true });
+        iframe.addEventListener("error", () => reject(new Error("verification frame failed to load")), { once: true });
+    });
+}
+
+function findFrameCandidate(frameDocument, candidate) {
+    try {
+        const directMatch = frameDocument.querySelector(candidate.selector);
+        if (directMatch) {
+            return directMatch;
+        }
+    } catch (e) {
+        // Fall through to the broader candidate scan.
+    }
+
+    for (const elem of frameDocument.body.querySelectorAll("*")) {
+        if (constants.isCountdownCandidateNode(elem, null)) {
+            return elem;
+        }
+    }
+    return null;
+}
+
+async function verifyCountdownCandidatesInHiddenFrame(candidates) {
+    if (candidates.length === 0 || isCountdownVerificationFrame || !/^https?:/i.test(location.href)) {
+        return [];
+    }
+
+    const cacheKey = `${location.href}|${candidates.map(candidate => candidate.signature).join("|")}`;
+    if (countdownVerificationCache.has(cacheKey)) {
+        const confirmedPhids = countdownVerificationCache.get(cacheKey);
+        return candidates.filter(candidate => confirmedPhids.has(candidate.phid));
+    }
+
+    let iframe;
+    try {
+        iframe = document.createElement("iframe");
+        iframe.name = `${countdownVerificationFramePrefix}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
+        iframe.setAttribute("aria-hidden", "true");
+        iframe.tabIndex = -1;
+        iframe.style.cssText = [
+            "position:fixed",
+            "left:-10000px",
+            "top:-10000px",
+            "width:1px",
+            "height:1px",
+            "opacity:0",
+            "visibility:hidden",
+            "pointer-events:none",
+            "border:0",
+        ].join(";");
+        iframe.src = location.href;
+        document.documentElement.appendChild(iframe);
+
+        await withTimeout(waitForFrameLoad(iframe), countdownVerificationTimeoutMs);
+        await wait(300);
+
+        const frameWindow = iframe.contentWindow;
+        const frameDocument = iframe.contentDocument;
+        if (!frameWindow || !frameDocument || !frameDocument.body) {
+            throw new Error("verification frame is inaccessible");
+        }
+
+        const before = new Map();
+        for (const candidate of candidates) {
+            const frameNode = findFrameCandidate(frameDocument, candidate);
+            if (frameNode) {
+                before.set(candidate.phid, {
+                    text: frameNode.innerText || frameNode.textContent || "",
+                    offerSignature: constants.countdownOfferSignature(frameNode),
+                });
+            }
+        }
+        if (before.size === 0) {
+            throw new Error("no matching countdown candidate in verification frame");
+        }
+
+        const event = new frameWindow.CustomEvent("kali-countdown-clock-advance", {
+            detail: { offsetMs: countdownVerificationAdvanceMs },
+        });
+        frameDocument.dispatchEvent(event);
+        frameWindow.dispatchEvent(event);
+        await wait(countdownVerificationSettleMs);
+
+        const confirmed = [];
+        for (const candidate of candidates) {
+            const beforeState = before.get(candidate.phid);
+            if (!beforeState) {
+                continue;
+            }
+            const frameNodeAfter = findFrameCandidate(frameDocument, candidate);
+            if (!frameNodeAfter) {
+                continue;
+            }
+            const textAfter = frameNodeAfter.innerText || frameNodeAfter.textContent || "";
+            if (
+                constants.countdownTextLooksReset(beforeState.text, textAfter) &&
+                constants.countdownOfferStillPresent(beforeState.offerSignature, frameNodeAfter)
+            ) {
+                confirmed.push(candidate);
+            }
+        }
+
+        countdownVerificationCache.set(cacheKey, new Set(confirmed.map(candidate => candidate.phid)));
+        return confirmed;
+    } catch (e) {
+        console.debug("Countdown verification failed:", e);
+        countdownVerificationCache.set(cacheKey, new Set());
+        return [];
+    } finally {
+        if (iframe) {
+            iframe.remove();
+        }
+    }
+}
+
 /**
  * Checks a DOM node for patterns. This is done using the detection functions defined in the `patternConfig`.
  * @param {Node} node The DOM node to be inspected for patterns.
@@ -329,6 +590,18 @@ function findPatterInNode(node, nodeOld) {
         }
     }
     return null;
+}
+
+function markDetectedElement(elem, pattern) {
+    elem.classList.add(
+        constants.patternDetectedClassName,
+        constants.extensionClassPrefix + pattern.className
+    );
+    if (constants.SHOW_DEBUG_BOXES) {
+        elem.classList.add(constants.debugBoxClassName);
+    }
+    elem.title = pattern.info;
+    addExplainIcon(elem, pattern);
 }
 
 // (elem, details) pairs whose icon position needs to follow elem — see
@@ -356,13 +629,7 @@ function addExplainIcon(elem, pattern) {
     details.className = constants.extensionClassPrefix + "info-icon";
 
     const summary = document.createElement("summary");
-    const icon = document.createElement("img");
-    // Cropped + background-removed from the Kali brand animation
-    // (noch ergämnzen/Firefly_starts_to_glow_...gif) — see
-    // vendor/pattern-highlighter/chrome/images/firefly-glow.webp.
-    icon.src = brw.runtime.getURL("images/firefly-glow.webp");
-    icon.alt = "";
-    summary.appendChild(icon);
+    summary.textContent = "ⓘ";
     details.appendChild(summary);
 
     const info = document.createElement("p");
@@ -413,15 +680,15 @@ window.addEventListener("resize", _repositionExplainIcons, { passive: true });
  * @param {Node} node A DOM node or a complete DOM tree in which to search for patterns.
  * @param {Node} domOld The complete previous state of the DOM tree of the page.
  */
-function findPatternDeep(node, domOld) {
+function findPatternDeep(node, domOld, countdownCandidates = []) {
     // Iterate over all child nodes of the provided DOM node.
     for (const child of node.children) {
         // Execute the function recursively on each child node.
-        findPatternDeep(child, domOld);
+        findPatternDeep(child, domOld, countdownCandidates);
     }
 
-    // Extract the previous state of the node from the old DOM. Is `null` if the node did not exist yet.
-    let nodeOld = getElementByPhid(domOld, node.dataset.phid);
+    // Extract the previous state of the node from the old DOM if one exists.
+    let nodeOld = domOld ? getElementByPhid(domOld, node.dataset.phid) : null;
     // Check if the node represents one of the patterns.
     let foundPattern = findPatterInNode(node, nodeOld);
 
@@ -432,17 +699,11 @@ function findPatternDeep(node, domOld) {
         let elem = getElementByPhid(document, node.dataset.phid);
         // Check if the element still exists.
         if (elem) {
-            // Add a general class for patterns to the element
-            // and a class for the specific pattern the element represents.
-            elem.classList.add(
-                constants.patternDetectedClassName,
-                constants.extensionClassPrefix + foundPattern.className
-            );
-            // Show the pattern's explanation as a native tooltip on hover,
-            // plus a clickable icon (native <details>/<summary>, no JS
-            // open/close state needed) that opens the same explanation.
-            elem.title = foundPattern.info;
-            addExplainIcon(elem, foundPattern);
+            if (foundPattern.className === "countdown") {
+                countdownCandidates.push(countdownCandidateFromElement(elem, foundPattern));
+            } else {
+                markDetectedElement(elem, foundPattern);
+            }
         }
         // Remove the previous state of the node, if it exists.
         if (nodeOld) {
@@ -622,14 +883,44 @@ function getAbsoluteOffsetFromBody(elem) {
     };
 }
 
+// Lazily-created closed Shadow DOM host for the highlight-glow element
+// below — keeps its CSS (and any future extension-owned overlay UI) fully
+// isolated from the host page's own styles, and vice versa.
+let _phShadowRoot = null;
+function _getShadowRoot() {
+    if (!_phShadowRoot) {
+        const host = document.createElement("div");
+        document.body.appendChild(host);
+        _phShadowRoot = host.attachShadow({ mode: "closed" });
+        const style = document.createElement("style");
+        style.textContent = `
+.__ph__current-pattern {
+    position: absolute;
+    z-index: 10000;
+    box-shadow: 0 0 120px 150px red;
+    animation: __ph__highlight 5s;
+    opacity: 0;
+}
+@keyframes __ph__highlight {
+    from { opacity: 0.75; }
+    to { opacity: 0; }
+}
+`;
+        _phShadowRoot.appendChild(style);
+    }
+    return _phShadowRoot;
+}
+
 /**
  * Shows an element on the page by automatically scrolling so that the element is vertically centered in the viewport.
  * Additionally, a catchy shadow is added for a few seconds, whose appearance is predefined by corresponding CSS styles.
  * @param {number} phid The pattern highlighter ID of the element that will be shown.
  */
 function showElement(phid) {
+    const shadowRoot = _getShadowRoot();
+
     // Remove all old shadow elements.
-    for (const element of document.getElementsByClassName(constants.currentPatternClassName)) {
+    for (const element of shadowRoot.querySelectorAll("." + constants.currentPatternClassName)) {
         element.remove();
     }
 
@@ -666,6 +957,6 @@ function showElement(phid) {
     // Add a class for which there are predefined styles to represent the shadow.
     highlightShadowElem.classList.add(constants.currentPatternClassName);
 
-    // Add the shadow element to the DOM.
-    document.body.appendChild(highlightShadowElem);
+    // Add the shadow element to the isolated Shadow DOM.
+    shadowRoot.appendChild(highlightShadowElem);
 }

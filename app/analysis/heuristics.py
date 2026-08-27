@@ -17,6 +17,14 @@ def find_preticked_checkboxes(dom_html: str) -> list[dict]:
     for box in soup.find_all("input", {"type": "checkbox"}):
         if "checked" not in box.attrs:
             continue
+        if "disabled" in box.attrs:
+            continue
+        label_text = _label_text_for(soup, box)
+        if _is_required_cookie_checkbox(box, label_text):
+            continue
+        haystack = _field_haystack(box, label_text)
+        if not _has_preticked_consent_or_addon_context(haystack):
+            continue
         forced_required = "required" in box.attrs
         findings.append(
             {
@@ -71,19 +79,44 @@ _NEGATION_KEYWORDS = (
     "do not",
 )
 
-# Left-word-boundary matching (not plain substring) so e.g. "ohne" doesn't
-# match mid-word inside words like "bewohnen" — routine German vocabulary on
-# checkout/registration pages. No trailing \b, deliberately: German negation
-# words conjugate/inflect ("verzicht" -> "verzichte"/"verzichtet") and a
-# leading boundary is enough to rule out the false-positive substring case
-# while still matching those suffixed forms.
+# German terms keep the prefix-friendly left boundary for inflections
+# ("verzicht" -> "verzichte"). English terms need full word boundaries:
+# live benchmark false positives showed "not" matching inside "Notes" and
+# "Notwendig".
 _NEGATION_PATTERN = re.compile(
-    "|".join(rf"\b{re.escape(kw)}" for kw in _NEGATION_KEYWORDS)
+    r"\b(?:nicht|kein|keine|ohne|niemals|verzicht\w*)"
+    r"|\b(?:not|don't|do not)\b",
+    re.IGNORECASE,
 )
+
+_TRICK_CONTEXT_PATTERN = re.compile(
+    r"\b(?:newsletter|marketing|promo(?:tion)?s?|angebote?|werbung|werbe|"
+    r"tracking|kontakt(?:ieren)?|contact|sms|e-?mail|emails?|abonnieren|subscribe|"
+    r"einwilligung|consent)\b",
+    re.IGNORECASE,
+)
+
+_REQUIRED_COOKIE_PATTERN = re.compile(
+    r"\b(?:technisch notwendig|notwendig|necessary|essential|obligatory|"
+    r"erforderlich|nicht abwählbar|nicht abwaehlbar|always active|immer aktiv)\b",
+    re.IGNORECASE,
+)
+
+_COOKIE_FIELD_PATTERN = re.compile(r"\b(?:cookie\w*|cookies|consent\w*|privacy|datenschutz)\b", re.IGNORECASE)
+_PRETICKED_CONTEXT_PATTERN = re.compile(
+    r"\b(?:"
+    r"newsletter|marketing|werbung|angebote|promotion|promotions|email|e-mail|sms|tracking|"
+    r"cookie\w*|cookies|consent\w*|einwilligung|zustimmung|datenschutz|privacy|agb|terms|"
+    r"zusatz|addon|add-on|extra|versicherung|warranty|garantie|schutzbrief|"
+    r"abo|subscription|subscribe|kostenpflichtig|gebühr|gebuehr|charge|fee|checkout|kasse|bestellung"
+    r")\b",
+    re.IGNORECASE,
+)
+_PASSIVE_CONTROL_PATTERN = re.compile(r"\b(?:toggle|switch|filter|sort|calculator|rechner|roi|billing[-_\s]?cycle)\b", re.IGNORECASE)
 
 
 def _has_negation(text: str) -> bool:
-    return bool(_NEGATION_PATTERN.search(text.lower()))
+    return bool(_NEGATION_PATTERN.search(text))
 
 
 def _label_text_for(soup, box) -> str:
@@ -96,6 +129,50 @@ def _label_text_for(soup, box) -> str:
     return parent_label.get_text(strip=True) if parent_label else ""
 
 
+def _field_haystack(box, label_text: str) -> str:
+    parts = [label_text]
+    for attr in ("id", "name", "class", "aria-label"):
+        value = box.get(attr)
+        if isinstance(value, list):
+            parts.extend(value)
+        elif value:
+            parts.append(str(value))
+    for parent in box.find_parents(["form", "fieldset", "section", "div"], limit=3):
+        for attr in ("id", "class", "aria-label"):
+            value = parent.get(attr)
+            if isinstance(value, list):
+                parts.extend(value)
+            elif value:
+                parts.append(str(value))
+        parent_text = parent.get_text(" ", strip=True)
+        if parent_text and parent.name != "form":
+            parts.append(parent_text[:300])
+    return " ".join(parts)
+
+
+def _is_required_cookie_checkbox(box, label_text: str) -> bool:
+    haystack = _field_haystack(box, label_text)
+    return bool(_COOKIE_FIELD_PATTERN.search(haystack) and _REQUIRED_COOKIE_PATTERN.search(haystack))
+
+
+def _has_preticked_consent_or_addon_context(haystack: str) -> bool:
+    if not _PRETICKED_CONTEXT_PATTERN.search(haystack):
+        return False
+    if _PASSIVE_CONTROL_PATTERN.search(haystack) and not re.search(
+        r"\b(?:newsletter|marketing|werbung|tracking|cookie\w*|consent\w*|einwilligung|zustimmung|"
+        r"datenschutz|privacy|agb|terms|zusatz|addon|add-on|extra|versicherung|warranty|garantie|"
+        r"schutzbrief|kostenpflichtig|gebühr|gebuehr|charge|fee)\b",
+        haystack,
+        re.IGNORECASE,
+    ):
+        return False
+    return True
+
+
+def _has_trick_question_context(text_a: str, text_b: str) -> bool:
+    return bool(_TRICK_CONTEXT_PATTERN.search(f"{text_a} {text_b}"))
+
+
 def find_trick_questions(dom_html: str) -> list[dict]:
     """Flags adjacent checkbox pairs whose labels switch polarity (one
     phrased as opt-in, the next as opt-out) — the classic "trick question"
@@ -105,6 +182,7 @@ def find_trick_questions(dom_html: str) -> list[dict]:
     boxes = soup.find_all("input", {"type": "checkbox"})
     labeled = [(box, _label_text_for(soup, box)) for box in boxes]
     labeled = [(box, text) for box, text in labeled if text]
+    labeled = [(box, text) for box, text in labeled if not _is_required_cookie_checkbox(box, text)]
 
     findings = []
     for i in range(len(labeled) - 1):
@@ -112,7 +190,7 @@ def find_trick_questions(dom_html: str) -> list[dict]:
         box_b, text_b = labeled[i + 1]
         negated_a = _has_negation(text_a)
         negated_b = _has_negation(text_b)
-        if negated_a != negated_b:
+        if negated_a != negated_b and _has_trick_question_context(text_a, text_b):
             findings.append(
                 {
                     "pattern_type": "Trick Questions",
@@ -177,14 +255,31 @@ def find_autoplay_media(dom_html: str) -> list[dict]:
     findings = []
     for tag in soup.find_all(("video", "audio")):
         if "autoplay" in tag.attrs:
+            if _is_muted_background_video(tag):
+                continue
             findings.append(
                 {
                     "pattern_type": "Exploiting Addiction (Autoplay)",
-                    "confidence_score": 0.6,
+                    # Below pipeline.MIN_CONFIDENCE on its own — a single
+                    # autoplay attribute is a weak, generic signal; needs
+                    # the co-occurrence boost from another finding on the
+                    # same page to be reported.
+                    "confidence_score": 0.5,
                     "evidence_data": {"selector": _selector_for(tag)},
                 }
             )
     return findings
+
+
+def _is_muted_background_video(tag) -> bool:
+    if tag.name != "video":
+        return False
+    classes = " ".join(tag.get("class", []))
+    return (
+        "muted" in tag.attrs
+        and "controls" not in tag.attrs
+        and "background" in classes.lower()
+    )
 
 
 # ponytail: only catches "sibling containers each holding a price + a
@@ -262,7 +357,9 @@ def find_decoy_pricing(dom_html: str) -> list[dict]:
                 findings.append(
                     {
                         "pattern_type": "Decoy Pricing",
-                        "confidence_score": 0.6,
+                        # Below pipeline.MIN_CONFIDENCE on its own — same
+                        # reasoning as autoplay above.
+                        "confidence_score": 0.5,
                         "evidence_data": {
                             "cheaper_selector": _selector_for(cheaper),
                             "pricier_selector": _selector_for(pricier),

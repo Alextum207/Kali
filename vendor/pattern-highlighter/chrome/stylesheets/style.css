@@ -1,23 +1,6 @@
-.__ph__pattern-detected {
+.__ph__debug-box {
     /** background-color: red !important; **/
     border: 2px solid black !important;
-}
-
-.__ph__current-pattern {
-    z-index: 10000 !important;
-    box-shadow: 0 0 120px 150px red;
-    animation: __ph__highlight 5s;
-    opacity: 0;
-}
-
-@keyframes __ph__highlight {
-    from {
-        opacity: 0.75;
-    }
-
-    to {
-        opacity: 0;
-    }
 }
 
 .__ph__info-icon {
@@ -30,16 +13,15 @@
     display: block;
     list-style: none;
     cursor: pointer;
+    width: 22px;
+    height: 22px;
+    line-height: 22px;
+    text-align: center;
+    font-size: 18px;
 }
 
 .__ph__info-icon > summary::-webkit-details-marker {
     display: none;
-}
-
-.__ph__info-icon > summary > img {
-    display: block;
-    height: 22px;
-    width: auto;
 }
 
 .__ph__info-icon > p,

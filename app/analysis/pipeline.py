@@ -1,4 +1,5 @@
 import logging
+import re
 
 from app.analysis.heuristics import (
     find_preticked_checkboxes,
@@ -16,10 +17,72 @@ from app.compliance import map_to_norm
 
 logger = logging.getLogger(__name__)
 
+_WHITESPACE_RE = re.compile(r"\s+")
+_NON_ALNUM_RE = re.compile(r"[^\w]+", re.UNICODE)
+
+
+def _normalize_for_quote_match(text: str) -> str:
+    return _WHITESPACE_RE.sub(" ", text).strip().lower()
+
+
+def _quote_in_text(quote: str, source_text: str) -> bool:
+    """True if `quote` plausibly appears verbatim in `source_text` — the text
+    the LLM was actually given. Strict check is whitespace-normalized
+    containment; a looser alphanumeric-only comparison follows, tolerating
+    punctuation/typography drift (typographic quotes, dashes) between the
+    model's quote and the extracted page text. Deliberately NOT fuzzy beyond
+    that: a quote that survives neither check is treated as hallucinated.
+    """
+    normalized_quote = _normalize_for_quote_match(quote)
+    normalized_source = _normalize_for_quote_match(source_text)
+    if normalized_quote in normalized_source:
+        return True
+    bare_quote = _NON_ALNUM_RE.sub("", normalized_quote)
+    bare_source = _NON_ALNUM_RE.sub("", normalized_source)
+    return bool(bare_quote) and bare_quote in bare_source
+
+
+def filter_unverified_llm_findings(findings: list[dict], source_text: str) -> list[dict]:
+    """Drops LLM findings whose `evidence_data["quote"]` cannot be located in
+    `source_text` (the exact text classify_text was given). The LLM is only
+    prompted to quote verbatim, never verified — without this gate a single
+    paraphrased or hallucinated quote goes straight into the DB, the report,
+    AND breaks screenshot annotation downstream (screenshot_annotate matches
+    on the same verbatim assumption). No quote field at all is also dropped:
+    every finding this function filters carries one by construction of
+    llm_classify._extract_findings. Best-effort audit trail: each drop is
+    logged with pattern_type + quote excerpt so systematic model failures
+    stay visible in the scan logs.
+    """
+    verified: list[dict] = []
+    for finding in findings:
+        quote = finding.get("evidence_data", {}).get("quote") or ""
+        if quote and _quote_in_text(quote, source_text):
+            verified.append(finding)
+        else:
+            logger.warning(
+                "classify_text finding dropped: quote not found in page text "
+                "(pattern_type=%r, quote=%r)",
+                finding.get("pattern_type"),
+                str(quote)[:120],
+            )
+    return verified
+
+
 # Confidence rises when multiple distinct manipulation mechanisms co-occur
 # on the same page (the book's "Double Shot" effect: persuasion + deception
 # stacked together signal deliberate intent, not an isolated UX slip).
 _COOCCURRENCE_BOOST = 0.05
+
+# Findings below this confidence are dropped before they're ever stored or
+# reported — generic/ambiguous single-signal detectors (autoplay attribute,
+# decoy pricing, low-contrast legal text) were deliberately tuned to sit just
+# under this cutoff (see their confidence_score comments), so they only
+# survive when _COOCCURRENCE_BOOST pushes them over via a second, independent
+# signal on the same page. Applied AFTER that boost for exactly this reason.
+# ponytail: single global cutoff, not empirically calibrated per pattern
+# type — revisit if real scans show a specific type needs its own threshold.
+MIN_CONFIDENCE = 0.6
 
 # Kurzbeschreibung der Verbraucher-Auswirkung je Pattern-Typ, für die
 # "Auswirkung"-Spalte in Findings-Tabelle/PDF-Report. Fallback "–" in den
@@ -111,7 +174,8 @@ async def run_analysis(
     main_text = extract_main_text(dom_html)
     findings.extend(find_regex_patterns(main_text))
     try:
-        findings.extend(await classify_text(main_text, client=llm_client))
+        llm_findings = await classify_text(main_text, client=llm_client)
+        findings.extend(filter_unverified_llm_findings(llm_findings, main_text))
     except Exception as exc:  # noqa: BLE001 - deliberate broad catch, LLM call
         logger.warning("classify_text failed, continuing without LLM findings: %s", exc)
 
@@ -144,6 +208,8 @@ async def run_analysis(
         boost = _COOCCURRENCE_BOOST * (len(distinct_types) - 1)
         for f in findings:
             f["confidence_score"] = round(min(f["confidence_score"] + boost, 1.0), 2)
+
+    findings = [f for f in findings if f["confidence_score"] >= MIN_CONFIDENCE]
 
     for f in findings:
         f["target_norm"] = map_to_norm(f["pattern_type"])

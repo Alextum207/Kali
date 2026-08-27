@@ -16,14 +16,33 @@ const brw = chrome;
 // button. Same recall ceiling as the Python port; upgrade path there
 // applies here too (drive the toggle+save flow instead of only matching a
 // single click target) if recall on real pages turns out to matter more.
+//
+// Real bug reports from live pages (mistakes/fehlenden reject button nicht
+// erkannt[ 2].png): banners whose reject control says "Nicht akzeptieren"
+// or "Nur notwendige Cookies" were missed by both the rule-derived and the
+// keyword-fallback path. The lists below now cover the common German
+// inflections and negated-accept phrasings; note that
+// REJECT is always checked BEFORE ACCEPT in checkCookieBanner(), so a
+// control reading "nicht akzeptieren" can never be claimed by the
+// "akzeptieren" accept keyword.
 const REJECT_KEYWORDS = [
-    "reject", "decline", "ablehnen", "opt out", "opt-out",
-    "only necessary", "nur notwendig", "alle ablehnen",
+    "reject", "decline", "deny", "ablehnen", "opt out", "opt-out",
+    "only necessary", "nur notwendig", "nur notwendige",
+    "nur die notwendigen", "nur essenzielle", "nur essentielle",
+    "essential only", "necessary only", "nicht akzeptieren",
+    "nicht zustimmen", "continue without accepting",
+    "fortfahren ohne", "weiter ohne zu", "ohne einwilligung fortfahren",
 ];
 const ACCEPT_KEYWORDS = [
     "accept all", "agree", "akzeptieren", "zustimmen",
-    "alle akzeptieren", "allow all", "einverstanden",
+    "alle akzeptieren", "allow all", "alle zulassen", "einverstanden",
 ];
+const COOKIE_CONTEXT_KEYWORDS = [
+    "cookie", "cookies", "consent", "privacy", "datenschutz",
+    "einwilligung", "zustimmung", "akzeptieren", "ablehnen",
+    "accept all", "reject all",
+];
+const COOKIE_CONTROL_SELECTOR = "button, a, [role=button], input[type=button], input[type=submit]";
 const GENERIC_TAG_SELECTORS = new Set(["a", "button", "div", "span", "input", "section", "p"]);
 
 function matchesKeyword(hint, keywords) {
@@ -43,6 +62,84 @@ export function looksLikeAccept(hint) {
 
 export function isGenericSelector(selector) {
     return GENERIC_TAG_SELECTORS.has(selector.trim().toLowerCase());
+}
+
+function bannerHasCookieContext(selector) {
+    let el;
+    try {
+        el = document.querySelector(selector);
+    } catch (e) {
+        return false;
+    }
+    if (!el) return false;
+    const text = (el.textContent || "").toLowerCase();
+    return COOKIE_CONTEXT_KEYWORDS.some((kw) => text.includes(kw));
+}
+
+/**
+ * Real visibility check that works for position:fixed elements too.
+ * The old `el.offsetParent !== null` test was the root cause of the missing-
+ * reject false negatives (mistakes/fehlenden reject button nicht erkannt[ 2].png):
+ * offsetParent is ALWAYS null for fixed-position elements, and cookie banners
+ * are almost always position:fixed — so visible reject controls inside them
+ * were silently skipped as invisible.
+ */
+export function elementIsVisible(el) {
+    if (!el || typeof el.getBoundingClientRect !== "function") return false;
+    const rects = el.getClientRects();
+    if (!rects || rects.length === 0) {
+        const rect = el.getBoundingClientRect();
+        if (rect.width <= 0 && rect.height <= 0) return false;
+    }
+    const style = getComputedStyle(el);
+    if (style.display === "none" || style.visibility === "hidden") return false;
+    if (parseFloat(style.opacity) === 0) return false;
+    return true;
+}
+
+function findVisibleKeywordControl(containerSelector, keywords) {
+    let container;
+    try {
+        container = document.querySelector(containerSelector);
+    } catch (e) {
+        return null;
+    }
+    if (container) {
+        const found = findVisibleKeywordControlWithin(container, keywords);
+        if (found) return found;
+    }
+    // Fallback beyond the presentMatcher container: some sites render their
+    // reject control outside the element matched by the vendored rule (e.g.
+    // the rule matches an inner text block, while the buttons live in a
+    // sibling of the banner wrapper). Keyword phrases like "Alle ablehnen"/
+    // "Nicht akzeptieren" are specific enough that a document-wide sweep
+    // among clickable controls is safe in practice.
+    return findVisibleKeywordControlWithin(document.body, keywords);
+}
+
+// Minimum share of an element's own text a matched keyword must make up.
+// Guards against a keyword being buried in a longer sentence/link — e.g. a
+// per-vendor fine-print opt-out ("für Utiq jetzt ablehnen", a single
+// third-party opt-out link deep in the legal text, not a general "reject
+// all" control) matches "ablehnen" as a bare substring but is nowhere near
+// as prominent as "Alle akzeptieren" (real bug: mistakes/fehlenden reject
+// button nicht erkannt[ 2].png — bild.de's Sourcepoint banner has exactly
+// such a link, which made the fallback sweep wrongly conclude a reject
+// option exists). Real reject/accept controls are short standalone labels
+// where the keyword IS essentially the whole text.
+const KEYWORD_STANDALONE_RATIO = 0.5;
+
+function findVisibleKeywordControlWithin(rootEl, keywords) {
+    if (!rootEl) return null;
+    for (const el of rootEl.querySelectorAll(COOKIE_CONTROL_SELECTOR)) {
+        const text = ((el.textContent || el.value || "") + "").toLowerCase().trim();
+        if (!text) continue;
+        const matched = keywords.some((kw) => text.includes(kw) && kw.length / text.length >= KEYWORD_STANDALONE_RATIO);
+        if (matched && elementIsVisible(el)) {
+            return el;
+        }
+    }
+    return null;
 }
 
 /**
@@ -161,30 +258,95 @@ export function resolveSelector(scoped) {
         return null;
     }
     if (!scoped.textFilter) return candidates[0] || null;
+    // Case-insensitive substring, mirroring Playwright's :has-text() which the
+    // Python crawler relies on — resolveSelector() previously used a case-
+    // sensitive includes() and silently diverged from it (a rule textFilter
+    // "Ablehnen" no longer resolved against an "ablehnen" button).
+    const needle = scoped.textFilter.toLowerCase();
     for (const el of candidates) {
-        if (el.textContent.includes(scoped.textFilter)) return el;
+        if (el.textContent.toLowerCase().includes(needle)) return el;
     }
     return null;
 }
 
 /**
- * Reads an element's box size + resolved background/text color. Synchronous
- * port of app/crawler.py's _read_style (no eval_on_selector round trip
- * needed — this already runs in-page).
+ * Parses any CSS color string into [r, g, b, a]. Unlike the previous regex
+ * this keeps the ALPHA channel: rgba(0, 0, 0, 0) (fully transparent — the
+ * default background of most buttons) must NOT collapse to opaque black,
+ * which previously produced arbitrary contrast numbers and masked real
+ * dimming asymmetries (mistakes/verdunklung von auswahl speicher nicht
+ * erkannt.png).
+ */
+function parseRgba(s) {
+    const m = String(s || "").match(/[\d.]+/g);
+    if (!m || m.length < 3) return [0, 0, 0, 1];
+    const a = m.length > 3 ? parseFloat(m[3]) : 1;
+    return [parseInt(m[0]), parseInt(m[1]), parseInt(m[2]), Number.isFinite(a) ? a : 1];
+}
+
+function clamp01(v) {
+    const n = parseFloat(v);
+    return Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 1;
+}
+
+/**
+ * Effective on-screen background color: composites each ancestor's
+ * backgroundColor (+ its own opacity) over white, bottom-up. A button dimmed
+ * via `opacity: 0.6` or a translucent overlay therefore yields a genuinely
+ * washed-out color instead of the raw, undimmed one.
+ */
+export function effectiveBackgroundColor(el, maxDepth = 12) {
+    let bg = [255, 255, 255];
+    let node = el;
+    for (let depth = 0; node && node.nodeType === 1 && depth < maxDepth; depth++, node = node.parentElement) {
+        const style = getComputedStyle(node);
+        const c = parseRgba(style.backgroundColor);
+        const a = clamp01(c[3]) * clamp01(style.opacity);
+        if (a > 0) {
+            bg = [c[0] * a + bg[0] * (1 - a), c[1] * a + bg[1] * (1 - a), c[2] * a + bg[2] * (1 - a)];
+        }
+        if (a >= 0.995) break;
+    }
+    return bg.map(Math.round);
+}
+
+/**
+ * Effective on-screen text color: the element's resolved color composited
+ * over the effective background, with every ancestor's opacity applied
+ * (ancestor opacity dims descendants too). This is what makes "Verdunklung"
+ * (dimmed secondary actions like "Auswahl speichern") measurable at all:
+ * raw getComputedStyle().color is unchanged by opacity.
+ */
+export function effectiveTextColor(el, maxDepth = 12) {
+    const fg = parseRgba(getComputedStyle(el).color);
+    let opacityProduct = 1;
+    let node = el;
+    for (let depth = 0; node && node.nodeType === 1 && depth < maxDepth; depth++, node = node.parentElement) {
+        opacityProduct *= clamp01(getComputedStyle(node).opacity);
+    }
+    const a = clamp01(fg[3]) * opacityProduct;
+    const bg = effectiveBackgroundColor(el, maxDepth);
+    return [
+        Math.round(fg[0] * a + bg[0] * (1 - a)),
+        Math.round(fg[1] * a + bg[1] * (1 - a)),
+        Math.round(fg[2] * a + bg[2] * (1 - a)),
+    ];
+}
+
+/**
+ * Reads an element's box size + EFFECTIVE (opacity/alpha-composited)
+ * background/text colors. Port of app/crawler.py's _read_style, upgraded so
+ * visually dimmed secondary actions compare against the accept button the
+ * way they actually render.
  */
 export function readStyle(el) {
     if (!el) return null;
     const rect = el.getBoundingClientRect();
-    const style = getComputedStyle(el);
-    const parseRgb = (s) => {
-        const m = s.match(/\d+/g);
-        return m ? [parseInt(m[0]), parseInt(m[1]), parseInt(m[2])] : [0, 0, 0];
-    };
     return {
         width: rect.width,
         height: rect.height,
-        bgColor: parseRgb(style.backgroundColor),
-        textColor: parseRgb(style.color),
+        bgColor: effectiveBackgroundColor(el),
+        textColor: effectiveTextColor(el),
     };
 }
 
@@ -251,11 +413,13 @@ export async function checkCookieBanner() {
         rejectOptionMissing: false,
         presentVendorKey: null,
         presentSelector: null,
+        genericBannerEl: null,
     };
 
     for (const data of rules) {
         const present = matchesPresentDetector(data);
         if (!present) continue;
+        if (!bannerHasCookieContext(present.selector)) continue;
         result.presentVendorKey = present.key;
         result.presentSelector = present.selector;
 
@@ -275,11 +439,102 @@ export async function checkCookieBanner() {
             }
         }
 
-        if (!foundRejectCandidate && !hasConsentToggle(data)) {
+        if (!foundRejectCandidate) {
+            const visibleReject = findVisibleKeywordControl(present.selector, REJECT_KEYWORDS);
+            if (visibleReject) {
+                foundRejectCandidate = true;
+                if (!result.rejectEl) result.rejectEl = visibleReject;
+            }
+        }
+
+        // No one-click reject-equivalent found → flag it, regardless of
+        // whether the rule models consent via per-category toggles behind a
+        // visible "Einstellungen"/settings affordance. A previous version
+        // suppressed the flag whenever such a settings link was reachable,
+        // reasoning "the user can still reject via there" — but needing to
+        // open a settings panel and toggle things off, versus one click to
+        // accept, IS the asymmetry this check exists to catch (real bug,
+        // live-verified on bild.de's Sourcepoint banner: `hasConsentToggle`
+        // is true and "Einstellungen" is visible, so the old logic silently
+        // cleared the flag on exactly the banner from mistakes/fehlenden
+        // reject button nicht erkannt[ 2].png). `hasConsentToggle` is no
+        // longer consulted here.
+        if (!foundRejectCandidate) {
             result.rejectOptionMissing = true;
         }
         break;
     }
 
+    // No vendored rule's presentMatcher matched anything on this page — the
+    // banner belongs to a CMP outside the ~206 vendored rules (real example:
+    // businessinsider.de/bild.de's bespoke "Mit/Ohne Tracking und Cookies
+    // nutzen" banner, mistakes/fehlenden reject button nicht erkannt[ 2].png).
+    // Without this fallback such banners are silently treated as "fine" —
+    // rejectOptionMissing stays false regardless of whether a reject option
+    // truly exists, independent of every keyword/visibility fix above.
+    if (!result.presentSelector) {
+        const acceptEl = findVisibleKeywordControlWithin(document.body, ACCEPT_KEYWORDS);
+        if (acceptEl) {
+            const container = findGenericBannerContainer(acceptEl);
+            if (container) {
+                const rejectEl = findVisibleKeywordControlWithin(container, REJECT_KEYWORDS);
+                if (!rejectEl) {
+                    result.rejectOptionMissing = true;
+                    result.genericBannerEl = container;
+                }
+            }
+        }
+    }
+
     return result;
+}
+
+function elementHasCookieContext(el) {
+    const text = ((el && el.textContent) || "").toLowerCase();
+    return COOKIE_CONTEXT_KEYWORDS.some((kw) => text.includes(kw));
+}
+
+/**
+ * Structural signal that a container actually IS a banner/modal, not just
+ * some ancestor that happens to contain cookie-related text somewhere (e.g.
+ * a footer with a "Privacy Policy" link sitting a few levels above an
+ * unrelated button). Checked in addition to elementHasCookieContext() in
+ * findGenericBannerContainer() below — false-positive guard for the
+ * render.com "New" button class of bug (a keyword match alone, without this,
+ * accepted any ancestor whose text happened to mention "privacy").
+ */
+function looksLikeBannerContainer(el) {
+    if (!el) return false;
+    const style = getComputedStyle(el);
+    if (style && (style.position === "fixed" || style.position === "sticky")) return true;
+    if (typeof el.getAttribute === "function") {
+        const role = (el.getAttribute("role") || "").toLowerCase();
+        if (role === "dialog" || el.getAttribute("aria-modal") === "true") return true;
+    }
+    const idClass = `${el.id || ""} ${el.className || ""}`.toLowerCase();
+    return /\b(cookie|consent|gdpr|banner|notice)\b/.test(idClass);
+}
+
+/**
+ * Bounded ancestor walk from a found accept button up to a container whose
+ * text mentions cookies/consent/privacy — the generic-fallback equivalent of
+ * a rule's presentMatcher-confirmed banner element. The keyword requirement
+ * is the first false-positive guard: a stray "akzeptieren" button elsewhere
+ * on the page (e.g. a newsletter form) won't have cookie-context text within
+ * a few ancestor levels, so it never produces a container and never flags.
+ * Among keyword-matching ancestors, one that also looksLikeBannerContainer()
+ * is preferred (closer to a real banner structurally); if none qualifies,
+ * falls back to the closest keyword match so recall on real-but-unstyled
+ * banners doesn't regress.
+ */
+function findGenericBannerContainer(startEl, maxLevels = 6) {
+    let node = startEl.parentElement;
+    let fallback = null;
+    for (let i = 0; i < maxLevels && node && node !== document.body; i++, node = node.parentElement) {
+        if (elementHasCookieContext(node)) {
+            if (looksLikeBannerContainer(node)) return node;
+            if (!fallback) fallback = node;
+        }
+    }
+    return fallback;
 }

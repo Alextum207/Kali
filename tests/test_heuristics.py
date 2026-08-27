@@ -11,7 +11,9 @@ from app.analysis.heuristics import (
 PRETICKED_HTML = """
 <form>
   <input type="checkbox" id="newsletter" checked>
+  <label for="newsletter">Newsletter und Angebote per E-Mail erhalten</label>
   <input type="checkbox" id="required" checked required>
+  <label for="required">AGB und Datenschutz akzeptieren</label>
 </form>
 """
 
@@ -39,6 +41,7 @@ AUTOPLAY_HTML = """
 <video id="hero-video" autoplay></video>
 <audio id="bg-audio" autoplay></audio>
 <video id="manual-video"></video>
+<video id="decorative-video" class="hds-video-background" autoplay muted loop playsinline></video>
 """
 
 
@@ -55,6 +58,65 @@ def test_find_preticked_checkboxes_flags_required_ones_with_higher_confidence():
     required = by_selector["#required"]
     assert required["confidence_score"] == 0.95
     assert required["evidence_data"]["forced_required"] is True
+
+
+def test_find_preticked_checkboxes_ignores_disabled_checked_boxes():
+    html = """
+    <form>
+      <input type="checkbox" id="locked" checked disabled>
+      <label for="locked">Locked setting</label>
+    </form>
+    """
+    assert find_preticked_checkboxes(html) == []
+
+
+def test_find_preticked_checkboxes_ignores_required_cookie_categories():
+    html = """
+    <form id="cookies">
+      <input type="checkbox" id="cookie-allow-necessary" checked disabled>
+      <label for="cookie-allow-necessary">Technisch notwendig (nicht abwählbar)</label>
+      <input type="checkbox" id="cookie-allow-statistics" checked>
+      <label for="cookie-allow-statistics">Statistik</label>
+    </form>
+    """
+    findings = find_preticked_checkboxes(html)
+
+    selectors = {finding["evidence_data"]["selector"] for finding in findings}
+    assert "#cookie-allow-necessary" not in selectors
+    assert "#cookie-allow-statistics" in selectors
+
+
+def test_find_preticked_checkboxes_uses_nearby_cookie_category_context():
+    html = """
+    <form id="onetrust-consent-sdk">
+      <div class="cookie-category">
+        <p>Unbedingt erforderliche Cookies sind immer aktiv.</p>
+        <input type="checkbox" id="ot-group-id-C0001" checked>
+      </div>
+      <div class="cookie-category">
+        <p>Marketing Cookies</p>
+        <input type="checkbox" id="ot-group-id-C0004" checked>
+      </div>
+    </form>
+    """
+    findings = find_preticked_checkboxes(html)
+
+    selectors = {finding["evidence_data"]["selector"] for finding in findings}
+    assert "#ot-group-id-C0001" not in selectors
+    assert "#ot-group-id-C0004" in selectors
+
+
+def test_find_preticked_checkboxes_ignores_plain_pricing_calculator_options():
+    html = """
+    <form id="roi-calculator">
+      <input type="checkbox" id="roi-app-slack" checked>
+      <label for="roi-app-slack">Slack</label>
+      <input type="checkbox" id="billing-cycle-toggle" checked>
+      <label for="billing-cycle-toggle">Jährlich zahlen</label>
+    </form>
+    """
+
+    assert find_preticked_checkboxes(html) == []
 
 
 def test_find_countdown_elements():
@@ -74,6 +136,26 @@ def test_find_trick_questions_flags_opposite_polarity_labels():
 
 def test_find_trick_questions_ignores_consistent_polarity():
     assert find_trick_questions(CONSISTENT_CHECKBOXES_HTML) == []
+
+
+def test_find_trick_questions_does_not_treat_notes_as_not():
+    html = """
+    <form>
+      <input type="checkbox" id="notes"><label for="notes">Map Notes</label>
+      <input type="checkbox" id="data"><label for="data">Map Data</label>
+    </form>
+    """
+    assert find_trick_questions(html) == []
+
+
+def test_find_trick_questions_requires_marketing_or_consent_context():
+    html = """
+    <form>
+      <input type="checkbox" id="terms"><label for="terms">Ich habe die Datenschutzerklärung gelesen.</label>
+      <input type="checkbox" id="survey"><label for="survey">Weisen Sie mich bitte nicht mehr auf diese Umfrage hin.</label>
+    </form>
+    """
+    assert find_trick_questions(html) == []
 
 
 EXTENDED_NEGATION_HTML = """
@@ -180,7 +262,7 @@ def test_find_decoy_pricing_flags_asymmetric_dominance():
     assert len(findings) == 1
     finding = findings[0]
     assert finding["pattern_type"] == "Decoy Pricing"
-    assert finding["confidence_score"] == 0.6
+    assert finding["confidence_score"] == 0.5
     assert finding["evidence_data"]["cheaper_price"] == 9.99
     assert finding["evidence_data"]["pricier_price"] == 10.99
     assert finding["evidence_data"]["cheaper_value_count"] == 1
