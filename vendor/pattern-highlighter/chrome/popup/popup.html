@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        /* Kali brand palette, matching frontend/src/index.css's .kali-light
+           theme (cream/olive-gold) — kept as plain hex here since this page
+           has no Tailwind build step. */
+        body {
+            margin: 0;
+            padding: 8px;
+            width: 300px;
+            box-sizing: border-box;
+            text-align: center;
+            font-size: 0.85em;
+            font-family: "Montserrat", system-ui, sans-serif;
+            background: #F4EEE1;
+            color: #151514;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            body {
+                color: #F4EEE1;
+                background: #151514;
+            }
+        }
+    </style>
+    <script type="module" src="popup.js"></script>
+</head>
+
+<body>
+    <extension-popup></extension-popup>
+</body>
+
+</html>

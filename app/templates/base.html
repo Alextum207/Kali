@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <title>{% block title %}Kali{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+  {% block head %}{% endblock %}
+</head>
+<body>
+  <nav class="nav">
+    <a href="/" class="nav-brand">Kali</a>
+    <a href="/">Dashboard</a>
+    <a href="/market">Marktbeobachtung</a>
+  </nav>
+  <main class="container">
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

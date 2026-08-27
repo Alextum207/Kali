@@ -1,12 +1,26 @@
-<!doctype html>
-<html>
-<head><meta charset="utf-8"><title>Dark-Pattern-Monitor</title></head>
-<body>
-  <h1>Dark-Pattern-Monitor</h1>
-  <form method="post" action="/scans">
-    <input type="url" name="url" placeholder="https://..." required>
-    <input type="number" name="max_pages" value="5" min="1" title="Max. Seiten">
-    <button type="submit">Scan starten</button>
-  </form>
-</body>
-</html>
+{% extends "base.html" %}
+{% block title %}Dashboard – Kali{% endblock %}
+{% block content %}
+<h1>Scans</h1>
+
+<form class="scan-form" method="post" action="/scans">
+  <input type="text" name="url" placeholder="https://... (Schema optional)" required>
+  <input type="number" name="max_pages" value="5" min="1" title="Max. Seiten">
+  <button type="submit">Scan starten</button>
+</form>
+
+{% if scans %}
+<table>
+  <tr><th>URL</th><th>Gestartet</th><th>Risiko</th></tr>
+  {% for s in scans %}
+  <tr>
+    <td><a href="/scans/{{ s.id }}">{{ s.url }}</a></td>
+    <td>{{ s.started_at }}</td>
+    <td><span class="badge badge-{{ s.risk.level }}">{{ s.risk.level }} ({{ "%.2f"|format(s.risk.score) }})</span></td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<p>Noch keine Scans.</p>
+{% endif %}
+{% endblock %}

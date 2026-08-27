@@ -5,7 +5,9 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS scans (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     url TEXT NOT NULL,
-    started_at TEXT NOT NULL DEFAULT (datetime('now'))
+    status TEXT NOT NULL DEFAULT 'running',
+    started_at TEXT NOT NULL DEFAULT (datetime('now')),
+    finished_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS pages (
@@ -36,11 +38,42 @@ def _ensure_page_id_column(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE findings ADD COLUMN page_id INTEGER REFERENCES pages(id)")
 
 
+def _ensure_scan_status_columns(conn: sqlite3.Connection) -> None:
+    """Same idempotency guard as _ensure_page_id_column, for DBs created
+    before status/finished_at existed."""
+    cols = [row[1] for row in conn.execute("PRAGMA table_info(scans)")]
+    if "status" not in cols:
+        conn.execute("ALTER TABLE scans ADD COLUMN status TEXT NOT NULL DEFAULT 'running'")
+    if "finished_at" not in cols:
+        conn.execute("ALTER TABLE scans ADD COLUMN finished_at TEXT")
+
+
+def _ensure_human_review_column(conn: sqlite3.Connection) -> None:
+    """Same idempotency guard as _ensure_page_id_column, for DBs created
+    before human_review existed. NULL = ungeprüft, else "confirmed"/"dismissed"."""
+    cols = [row[1] for row in conn.execute("PRAGMA table_info(findings)")]
+    if "human_review" not in cols:
+        conn.execute("ALTER TABLE findings ADD COLUMN human_review TEXT")
+
+
+def _ensure_error_message_column(conn: sqlite3.Connection) -> None:
+    """Same idempotency guard as _ensure_page_id_column, for DBs created
+    before error_message existed. Set on status='error' to tell the user
+    *why* a scan failed (e.g. robots.txt disallow) instead of a generic
+    message."""
+    cols = [row[1] for row in conn.execute("PRAGMA table_info(scans)")]
+    if "error_message" not in cols:
+        conn.execute("ALTER TABLE scans ADD COLUMN error_message TEXT")
+
+
 def init_db(path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
     _ensure_page_id_column(conn)
+    _ensure_scan_status_columns(conn)
+    _ensure_human_review_column(conn)
+    _ensure_error_message_column(conn)
     conn.commit()
     return conn
 
@@ -49,6 +82,19 @@ def insert_scan(conn: sqlite3.Connection, url: str) -> int:
     cur = conn.execute("INSERT INTO scans (url) VALUES (?)", (url,))
     conn.commit()
     return cur.lastrowid
+
+
+def mark_scan_status(conn: sqlite3.Connection, scan_id: int, status: str, message: str | None = None) -> None:
+    conn.execute(
+        "UPDATE scans SET status = ?, finished_at = datetime('now'), error_message = ? WHERE id = ?",
+        (status, message, scan_id),
+    )
+    conn.commit()
+
+
+def set_human_review(conn: sqlite3.Connection, finding_id: int, value: str) -> None:
+    conn.execute("UPDATE findings SET human_review = ? WHERE id = ?", (value, finding_id))
+    conn.commit()
 
 
 def insert_page(conn: sqlite3.Connection, scan_id: int, url: str, category: str) -> int:
@@ -111,3 +157,35 @@ def get_page_findings(conn: sqlite3.Connection, page_id: int) -> list[dict]:
 def get_scan(conn: sqlite3.Connection, scan_id: int) -> dict | None:
     row = conn.execute("SELECT * FROM scans WHERE id = ?", (scan_id,)).fetchone()
     return dict(row) if row else None
+
+
+def list_scans(conn: sqlite3.Connection) -> list[dict]:
+    rows = conn.execute("SELECT * FROM scans ORDER BY id DESC").fetchall()
+    return [dict(row) for row in rows]
+
+
+def list_scans_by_url(conn: sqlite3.Connection, url: str) -> list[dict]:
+    rows = conn.execute("SELECT * FROM scans WHERE url = ? ORDER BY id DESC", (url,)).fetchall()
+    return [dict(row) for row in rows]
+
+
+def get_pattern_stats(conn: sqlite3.Connection) -> list[dict]:
+    rows = conn.execute(
+        """
+        SELECT pattern_type,
+               COUNT(*) AS finding_count,
+               COUNT(DISTINCT scan_id) AS scan_count,
+               AVG(confidence_score) AS avg_confidence
+        FROM findings
+        GROUP BY pattern_type
+        ORDER BY finding_count DESC
+        """
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def get_market_summary(conn: sqlite3.Connection) -> dict:
+    row = conn.execute(
+        "SELECT COUNT(*) AS total_scans, COUNT(DISTINCT url) AS total_domains FROM scans"
+    ).fetchone()
+    return dict(row)

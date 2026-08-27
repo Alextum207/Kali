@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Marktbeobachtung – Kali{% endblock %}
+{% block content %}
+<h1>Marktbeobachtung</h1>
+<p>Aggregierte Auswertung über alle bisher durchgeführten Scans.</p>
+
+<div class="card">
+  <span>Gescannte Domains: {{ summary.total_domains }}</span>
+  <span>Scans insgesamt: {{ summary.total_scans }}</span>
+</div>
+
+{% if stats %}
+<table>
+  <tr><th>Pattern-Typ</th><th>Funde</th><th>Betroffene Scans</th><th>Ø Confidence</th></tr>
+  {% for s in stats %}
+  <tr>
+    <td>{{ s.pattern_type }}</td>
+    <td>{{ s.finding_count }}</td>
+    <td>{{ s.scan_count }}</td>
+    <td>{{ "%.2f"|format(s.avg_confidence) }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<p>Noch keine Funde in der Datenbank.</p>
+{% endif %}
+{% endblock %}

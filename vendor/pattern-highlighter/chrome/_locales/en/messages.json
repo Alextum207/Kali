@@ -1,0 +1,214 @@
+{
+  "extName": {
+    "message": "Kali",
+    "description": "The name of the extension."
+  },
+  "extDescription": {
+    "message": "Detects and highlights different Dark Patterns on websites.",
+    "description": "The description of the extension."
+  },
+  "errorInvalidConfig": {
+    "message": "The internal pattern configuration of the extension is invalid. The pattern highlighter will not start.",
+    "description": "The error message in case of an invalid internal pattern configuration."
+  },
+  "buttonOnState": {
+    "message": "ON",
+    "description": "The message when the switch is turned on in the popup."
+  },
+  "buttonOffState": {
+    "message": "OFF",
+    "description": "The message when the switch is turned off in the popup."
+  },
+  "buttonReloadPageForChange": {
+    "message": "Refresh page to apply changes",
+    "description": "Text for the button to reload the page after a changed activation state."
+  },
+  "buttonRedoPatternCheck": {
+    "message": "Repeat pattern highlighting",
+    "description": "Text for the button to repeat the pattern highlighting on the page."
+  },
+  "buttonCreateReport": {
+    "message": "Create PDF report",
+    "description": "Text for the button that opens the report page with the current findings to print/save as PDF."
+  },
+  "headingShowPattern": {
+    "message": "Show patterns",
+    "description": "Heading in the popup for the buttons to show individual pattern elements."
+  },
+  "headingFoundPatterns": {
+    "message": "Patterns found",
+    "description": "Heading in the popup for the list of found patterns."
+  },
+  "headingSupportedPatterns": {
+    "message": "Supported pattern types",
+    "description": "Heading in the popup for the list of supported patterns."
+  },
+  "textMoreInformation": {
+    "message": "More information about Dark Patterns",
+    "description": "Text in the footer preceding the link to the Verbraucherzentrale website."
+  },
+  "infoExtensionStarted": {
+    "message": "Pattern Highlighter started.",
+    "description": "Message in the console when the pattern highlighter was started on a page."
+  },
+  "infoExtensionDisabled": {
+    "message": "Pattern Highlighter is disabled for this tab.",
+    "description": "Message in the console when the pattern highlighter is disabled in a tab."
+  },
+  "infoNumberPatternsFound": {
+    "message": "$COUNT$ pattern(s) detected.",
+    "description": "Message in the console about how many patterns were detected.",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "10"
+      }
+    }
+  },
+  "patternCountdown_name": {
+    "message": "Countdown",
+    "description": "Name of the countdown pattern."
+  },
+  "patternCountdown_infoUrl": {
+    "message": "https://www.verbraucherzentrale.de/wissen/digitale-welt/onlinedienste/dark-patterns-so-wollen-websites-und-apps-sie-manipulieren-58082",
+    "description": "URL to the explanation of the countdown pattern on the Verbraucherzentrale website."
+  },
+  "patternCountdown_info": {
+    "message": "Countdown patterns induce (truthfully or falsely) the impression that a product or service is only available for a certain period of time. This is illustrated through a running clock or a lapsing bar. You can watch as the desired good slips away.",
+    "description": "Brief explanation of the countdown Pattern."
+  },
+  "patternScarcity_name": {
+    "message": "Scarcity",
+    "description": "Name of the scarcity pattern."
+  },
+  "patternScarcity_infoUrl": {
+    "message": "https://www.verbraucherzentrale.de/wissen/digitale-welt/onlinedienste/dark-patterns-so-wollen-websites-und-apps-sie-manipulieren-58082",
+    "description": "URL to the explanation of the scarcity pattern on the Verbraucherzentrale website."
+  },
+  "patternScarcity_info": {
+    "message": "The Scarcity Pattern induces (truthfully or falsely) the impression that goods or services are only available in limited numbers. Scarcity Patterns are also used in versions where the alleged scarcity is simply invented or where it is not made clear whether the limited availability relates to the product as a whole or only to the contingent of the portal visited.",
+    "description": "Brief explanation of the scarcity Pattern."
+  },
+  "patternSocialProof_name": {
+    "message": "Social Proof",
+    "description": "Name of the social proof pattern."
+  },
+  "patternSocialProof_infoUrl": {
+    "message": "https://www.verbraucherzentrale.de/wissen/digitale-welt/onlinedienste/dark-patterns-so-wollen-websites-und-apps-sie-manipulieren-58082",
+    "description": "URL to the explanation of the social proof pattern on the Verbraucherzentrale website."
+  },
+  "patternSocialProof_info": {
+    "message": "Social Proof is another Dark Pattern of this category. Positive product reviews or activity reports from other users are displayed directly. Often, these reviews or reports are simply made up. But authentic reviews or reports also influence the purchase decision through smart selection and placement.",
+    "description": "Brief explanation of the social proof Pattern."
+  },
+  "patternForcedContinuity_name": {
+    "message": "Forced Continuity",
+    "description": "Name of the forced continuity pattern."
+  },
+  "patternForcedContinuity_infoUrl": {
+    "message": "https://www.verbraucherzentrale.de/wissen/digitale-welt/onlinedienste/dark-patterns-so-wollen-websites-und-apps-sie-manipulieren-58082",
+    "description": "URL to the explanation of the forced continuity pattern on the Verbraucherzentrale website."
+  },
+  "patternForcedContinuity_info": {
+    "message": "The Forced Continuity pattern automatically renews free or low-cost trial subscriptions - but for a fee or at a higher price. The design trick is that the order form visually suggests that there is no charge and conceals the (automatic) follow-up costs.",
+    "description": "Brief explanation of the forced continuity Pattern."
+  },
+  "patternPreTickedBox_name": {
+    "message": "Pre-ticked Box",
+    "description": "Name of the pre-ticked box pattern."
+  },
+  "patternPreTickedBox_infoUrl": {
+    "message": "https://www.verbraucherzentrale.de/wissen/digitale-welt/onlinedienste/dark-patterns-so-wollen-websites-und-apps-sie-manipulieren-58082",
+    "description": "URL to the explanation of the pre-ticked box pattern on the Verbraucherzentrale website."
+  },
+  "patternPreTickedBox_info": {
+    "message": "A checkbox that is checked by default tricks users into consenting to something (e.g. a newsletter) without an active choice.",
+    "description": "Brief explanation of the pre-ticked box pattern."
+  },
+  "patternAutoplay_name": {
+    "message": "Autoplay",
+    "description": "Name of the autoplay pattern."
+  },
+  "patternAutoplay_infoUrl": {
+    "message": "https://www.verbraucherzentrale.de/wissen/digitale-welt/onlinedienste/dark-patterns-so-wollen-websites-und-apps-sie-manipulieren-58082",
+    "description": "URL to the explanation of the autoplay pattern on the Verbraucherzentrale website."
+  },
+  "patternAutoplay_info": {
+    "message": "Video or audio elements that start playing automatically bind the user's attention without an active choice.",
+    "description": "Brief explanation of the autoplay pattern."
+  },
+  "patternTrickQuestions_name": {
+    "message": "Trick Questions",
+    "description": "Name of the trick questions pattern."
+  },
+  "patternTrickQuestions_infoUrl": {
+    "message": "https://www.verbraucherzentrale.de/wissen/digitale-welt/onlinedienste/dark-patterns-so-wollen-websites-und-apps-sie-manipulieren-58082",
+    "description": "URL to the explanation of the trick questions pattern on the Verbraucherzentrale website."
+  },
+  "patternTrickQuestions_info": {
+    "message": "Adjacent checkboxes whose labels switch negation polarity, so a consistent-looking checkbox list actually means the opposite of what a quick scan suggests.",
+    "description": "Brief explanation of the trick questions pattern."
+  },
+  "patternDecoyPricing_name": {
+    "message": "Decoy Pricing",
+    "description": "Name of the decoy pricing pattern."
+  },
+  "patternDecoyPricing_infoUrl": {
+    "message": "https://www.verbraucherzentrale.de/wissen/digitale-welt/onlinedienste/dark-patterns-so-wollen-websites-und-apps-sie-manipulieren-58082",
+    "description": "URL to the explanation of the decoy pricing pattern on the Verbraucherzentrale website."
+  },
+  "patternDecoyPricing_info": {
+    "message": "A pricing tier costs only slightly more than a neighboring one but offers disproportionately more value, nudging users toward the pricier option.",
+    "description": "Brief explanation of the decoy pricing pattern."
+  },
+  "patternCookieBannerAsymmetry_name": {
+    "message": "Cookie-Banner Button Asymmetry",
+    "description": "Name of the cookie-banner-asymmetry pattern."
+  },
+  "patternCookieBannerAsymmetry_infoUrl": {
+    "message": "https://www.verbraucherzentrale.de/wissen/digitale-welt/onlinedienste/dark-patterns-so-wollen-websites-und-apps-sie-manipulieren-58082",
+    "description": "URL to the explanation of the cookie-banner-asymmetry pattern on the Verbraucherzentrale website."
+  },
+  "patternCookieBannerAsymmetry_info": {
+    "message": "The cookie banner's \"accept all\" button is noticeably larger or higher-contrast than its \"reject\" button, nudging users toward consenting.",
+    "description": "Brief explanation of the cookie-banner-asymmetry pattern."
+  },
+  "patternCookieBannerMissingReject_name": {
+    "message": "Missing Reject Option (Cookie Banner)",
+    "description": "Name of the missing-reject-option pattern."
+  },
+  "patternCookieBannerMissingReject_infoUrl": {
+    "message": "https://www.verbraucherzentrale.de/wissen/digitale-welt/onlinedienste/dark-patterns-so-wollen-websites-und-apps-sie-manipulieren-58082",
+    "description": "URL to the explanation of the missing-reject-option pattern on the Verbraucherzentrale website."
+  },
+  "patternCookieBannerMissingReject_info": {
+    "message": "The cookie banner offers no equivalent one-click way to reject all non-essential cookies.",
+    "description": "Brief explanation of the missing-reject-option pattern."
+  },
+  "patternSneakingIntoBasket_name": {
+    "message": "Sneaking into Basket",
+    "description": "Name of the sneaking-into-basket pattern."
+  },
+  "patternSneakingIntoBasket_infoUrl": {
+    "message": "https://www.verbraucherzentrale.de/wissen/digitale-welt/onlinedienste/dark-patterns-so-wollen-websites-und-apps-sie-manipulieren-58082",
+    "description": "URL to the explanation of the sneaking-into-basket pattern on the Verbraucherzentrale website."
+  },
+  "patternSneakingIntoBasket_info": {
+    "message": "Der Checkout enthält mehr Artikel als ausgewählt: Der Shop hat zusätzliche Artikel oder Zusatzoptionen ohne ausdrückliche Zustimmung in den Warenkorb gelegt.",
+    "description": "Brief explanation of the sneaking-into-basket pattern."
+  },
+  "showPatternState": {
+    "message": "$CURRENT$ of $TOTAL$",
+    "description": "Display the number of the current pattern in the popup for the 'Show patterns' function.",
+    "placeholders": {
+      "current": {
+        "content": "$1",
+        "example": "1"
+      },
+      "total": {
+        "content": "$2",
+        "example": "4"
+      }
+    }
+  }
+}

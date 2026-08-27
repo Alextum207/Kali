@@ -13,6 +13,9 @@ def contrast_ratio(rgb_a: tuple[int, int, int], rgb_b: tuple[int, int, int]) -> 
     return max(l1, l2) / min(l1, l2)
 
 
+# ponytail: arbitrary thresholds, not derived from WCAG (unlike contrast_ratio()
+# which uses WCAG 2.1 luminance formula). Tuned by empirical observation of
+# dark-pattern designs; no recalibration attempted in this pass.
 SIZE_RATIO_THRESHOLD = 1.8
 CONTRAST_DELTA_THRESHOLD = 4.0
 

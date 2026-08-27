@@ -1,13 +1,27 @@
 import asyncio
+import hashlib
 import json
 import logging
+import os
 import pathlib
+import time
 import uuid
 from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
 
-from app.crawler import DEFAULT_CONSENT_RULES_DIR, _snapshot_page, apply_consent_rules
+from app.crawler import (
+    DEFAULT_CONSENT_RULES_DIR,
+    NAV_TIMEOUT_MS,
+    CaptchaRequiredError,
+    _looks_like_captcha,
+    _snapshot_page,
+    apply_consent_rules,
+)
+import httpx
+
+from app.llm_utils import extract_text, strip_json_fence
+from app.robots import USER_AGENT, RobotsDisallowedError, fetch_robots_parser
 from app.url_safety import validate_scan_url
 
 logger = logging.getLogger(__name__)
@@ -38,9 +52,15 @@ def discover_links(dom_html: str, base_url: str, allowed_hosts: set[str]) -> lis
     return links
 
 
+# Named separately (not just a PAGE_CATEGORIES/TARGET_CATEGORIES literal)
+# because app/scan.py::_checkout_price_increase_findings also needs to
+# filter on exactly this string — importing the constant keeps the two
+# files from silently drifting apart if this category is ever renamed.
+CHECKOUT_PAYMENT_CATEGORY = "checkout_payment"
+
 PAGE_CATEGORIES = (
     "cookie_consent",
-    "checkout_payment",
+    CHECKOUT_PAYMENT_CATEGORY,
     "product_category",
     "account_subscription",
     "popup_leadform",
@@ -48,7 +68,7 @@ PAGE_CATEGORIES = (
 )
 
 _CATEGORY_KEYWORDS = {
-    "checkout_payment": ("checkout", "kasse", "warenkorb", "cart", "bestellung", "payment", "zahlung"),
+    CHECKOUT_PAYMENT_CATEGORY: ("checkout", "kasse", "warenkorb", "cart", "bestellung", "payment", "zahlung"),
     "account_subscription": ("/account", "/konto", "subscription", "kündig", "cancel", "mein abo"),
     "product_category": ("product", "produkt", "/p/", "kategorie", "category"),
 }
@@ -56,11 +76,61 @@ _CATEGORY_KEYWORDS = {
 # The 3 categories predictable from a URL alone (unlike cookie_consent and
 # popup_leadform, which are states detected on whatever page they occur on,
 # not link targets to steer toward) — used to prioritize the crawl queue.
-TARGET_CATEGORIES = ("checkout_payment", "account_subscription", "product_category")
+TARGET_CATEGORIES = (CHECKOUT_PAYMENT_CATEGORY, "account_subscription", "product_category")
+
+# TARGET_CATEGORIES (URL-vorhersagbar) + popup_leadform: dieselbe
+# "genug gefunden"-Schwelle, die generische Links weiterverfolgt, bis alle
+# hier gelistet Kategorien mindestens einmal gesehen wurden — popup_leadform
+# ist nicht URL-vorhersagbar (kein Eintrag in _CATEGORY_KEYWORDS), taucht
+# aber wie die 3 TARGET_CATEGORIES nur durch zusätzliche Seiten-Discovery
+# auf, nicht automatisch wie cookie_consent (das läuft über
+# apply_consent_rules auf JEDER Seite, braucht daher keine eigene
+# Discovery-Garantie). Ohne diese Erweiterung wurden generische Links nach
+# Erreichen der 3 TARGET_CATEGORIES sofort verworfen — eine Popup-Seite, die
+# erst danach entdeckt wurde, wurde nie besucht.
+DISCOVERY_TARGET_CATEGORIES = TARGET_CATEGORIES + ("popup_leadform",)
 
 # Safety cap on decide_next_interaction/click loops within one category flow
 # (e.g. multi-step checkout) — a ceiling against dead-loop pages, not a goal.
-MAX_FLOW_STEPS = 5
+MAX_FLOW_STEPS = int(os.environ.get("MAX_FLOW_STEPS", "3"))
+
+# _check_infinite_scroll's page.evaluate() calls have no timeout of their
+# own and it's called outside crawl_site's nearby try/except, so a stalled
+# page can hang it forever with nothing to catch it. Same reasoning as
+# CONSENT_TIMEOUT_SECONDS in app/crawler.py.
+INFINITE_SCROLL_TIMEOUT_SECONDS = int(os.environ.get("INFINITE_SCROLL_TIMEOUT_SECONDS", "10"))
+
+# Per-page share of the overall scan time budget (see crawl_site) — scales
+# the budget with max_pages instead of a fixed value that cuts the
+# discovery loop off after 1-2 pages once max_pages is more than a handful.
+SCAN_SECONDS_PER_PAGE_BUDGET = float(os.environ.get("SCAN_SECONDS_PER_PAGE_BUDGET", "25"))
+
+# ponytail: fixed length cap, not loop detection — a self-referencing
+# redirect param (e.g. Amazon's preferencesReturnUrl, which re-encodes the
+# current URL into itself on every hop) grows monotonically each hop, so
+# this catches it generically after 1-2 hops without needing to
+# special-case any one site's param name. Upgrade to real cycle detection
+# if a legitimate long URL ever gets caught by this.
+MAX_DISCOVERED_URL_LENGTH = 512
+
+# context.close() (which flushes the HAR file) can itself hang on a real,
+# heavy site — confirmed against amazon.de: after several pages generating
+# a lot of recorded network traffic, the finally-block close() never
+# returned. It's the crawl's very last await with no bound of its own, so a
+# hang there means the whole scan hangs forever even though every page was
+# already crawled successfully. Bounding it here means we lose (at worst) an
+# incomplete HAR on a pathological site instead of hanging the scan.
+CONTEXT_CLOSE_TIMEOUT_SECONDS = int(os.environ.get("CONTEXT_CLOSE_TIMEOUT_SECONDS", "30"))
+
+# Cache for classify_page_category's LLM fallback ONLY — a routing decision
+# (which queue bucket a URL belongs to), never for dark-pattern findings.
+# Keyed on url+DOM-content-hash so any content change invalidates it.
+_CATEGORY_CACHE: dict[str, tuple[str, float]] = {}
+_CATEGORY_CACHE_TTL_SECONDS = int(os.environ.get("CATEGORY_CACHE_TTL_SECONDS", "600"))
+
+
+def _category_cache_key(url: str, dom_html: str) -> str:
+    return f"{url}:{hashlib.sha256(dom_html.encode('utf-8', 'ignore')).hexdigest()}"
 
 
 def _predict_category_from_url(url: str) -> str:
@@ -74,26 +144,32 @@ def _predict_category_from_url(url: str) -> str:
     return "other"
 
 
-def _llm_classify_category(url: str, dom_html: str, client) -> str:
+async def _llm_classify_category(url: str, dom_html: str, client) -> str:
     import re
 
-    text_sample = re.sub(r"<[^>]+>", " ", dom_html)[:1500]
+    soup = BeautifulSoup(dom_html, "html.parser")
+    main_content = soup.find("main") or soup.find("article")
+    # ponytail: best-effort <main>/<article> detection only, not full
+    # boilerplate-stripping — pages without either tag fall back to
+    # whole-page truncation as before; upgrade if that proves insufficient.
+    source_html = str(main_content) if main_content else dom_html
+    text_sample = re.sub(r"<[^>]+>", " ", source_html)[:1500]
     prompt = (
         "Klassifiziere folgende Webseite in genau eine Kategorie: "
         "cookie_consent, checkout_payment, product_category, account_subscription, "
         "popup_leadform, other. Antworte NUR mit dem Kategorie-Namen, nichts sonst.\n\n"
         f"URL: {url}\n\nSeiteninhalt (Auszug): {text_sample}"
     )
-    response = client.messages.create(
+    response = await client.messages.create(
         model="claude-sonnet-5",
         max_tokens=20,
         messages=[{"role": "user", "content": prompt}],
     )
-    result = response.content[0].text.strip().lower()
+    result = extract_text(response).strip().lower()
     return result if result in PAGE_CATEGORIES else "other"
 
 
-def classify_page_category(url: str, dom_html: str, llm_client=None) -> str:
+async def classify_page_category(url: str, dom_html: str, llm_client=None) -> str:
     haystack = url.lower()
     soup = BeautifulSoup(dom_html, "html.parser")
     heading = soup.find(["h1", "h2"])
@@ -105,12 +181,38 @@ def classify_page_category(url: str, dom_html: str, llm_client=None) -> str:
             return category
 
     if llm_client is not None:
+        key = _category_cache_key(url, dom_html)
+        cached = _CATEGORY_CACHE.get(key)
+        if cached is not None and time.monotonic() - cached[1] < _CATEGORY_CACHE_TTL_SECONDS:
+            return cached[0]
         try:
-            return _llm_classify_category(url, dom_html, llm_client)
+            category = await _llm_classify_category(url, dom_html, llm_client)
         except Exception as exc:  # noqa: BLE001 - deliberate broad catch, LLM call
             logger.warning("LLM category classification failed, using 'other': %s", exc)
+            return "other"
+        _CATEGORY_CACHE[key] = (category, time.monotonic())
+        return category
 
     return "other"
+
+
+# Keywords for flow-critical actions (cancel/checkout/cart) — used to
+# reorder clickable elements so these survive decide_next_interaction's
+# [:40] cap even when they sit deep in DOM order (e.g. behind a long nav).
+_INTERACTION_KEYWORDS = (
+    "kündig", "abbrechen", "zur kasse", "warenkorb", "bestellen", "checkout",
+)
+
+
+def _sort_by_interaction_keywords(elements: list[dict]) -> list[dict]:
+    """Stable-sorts clickable elements, keyword matches first, so the real
+    'Kündigen'/'Zur Kasse' button isn't dropped by the [:40] cap just
+    because nav/footer links precede it in DOM order."""
+    def relevance(el: dict) -> int:
+        text = el.get("text", "").lower()
+        return 0 if any(kw in text for kw in _INTERACTION_KEYWORDS) else 1
+
+    return sorted(elements, key=relevance)
 
 
 # One-line navigation goal per category; categories not listed here (or
@@ -131,13 +233,14 @@ _INTERACTION_GOALS = {
 }
 
 
-def decide_next_interaction(category: str, clickable_elements: list[dict], llm_client=None) -> dict | None:
+async def decide_next_interaction(category: str, clickable_elements: list[dict], llm_client=None) -> dict | None:
     goal = _INTERACTION_GOALS.get(category)
     if not goal or not clickable_elements or llm_client is None:
         return None
 
+    sorted_elements = _sort_by_interaction_keywords(clickable_elements)
     elements_text = "\n".join(
-        f'- "{el["text"]}" (selector: {el["selector"]})' for el in clickable_elements[:40]
+        f'- "{el["text"]}" (selector: {el["selector"]})' for el in sorted_elements[:40]
     )
     prompt = (
         f"Ziel: {goal}\n\n"
@@ -146,12 +249,23 @@ def decide_next_interaction(category: str, clickable_elements: list[dict], llm_c
         'für das nächste sinnvolle Element, oder {"type": "none"}, falls kein Element zum Ziel passt.'
     )
     try:
-        response = llm_client.messages.create(
+        # max_tokens=1024 (not the earlier 200): a judgment call among up to
+        # 40 candidate elements is more reasoning-heavy than e.g.
+        # _llm_classify_category's one-word answer, worth the headroom.
+        response = await llm_client.messages.create(
             model="claude-sonnet-5",
-            max_tokens=200,
+            max_tokens=1024,
             messages=[{"role": "user", "content": prompt}],
         )
-        result = json.loads(response.content[0].text)
+        # Confirmed live against temu.com: despite "AUSSCHLIESSLICH ein
+        # JSON-Objekt", the model sometimes wraps its answer in a Markdown
+        # code fence anyway ('```json\n{"type": "none"}\n```') —
+        # json.loads on that raises "Expecting value: line 1 column 1
+        # (char 0)" since a backtick isn't a valid JSON start character.
+        # That silently meant "no interaction" for every category on every
+        # page whenever the model happened to fence its answer. See
+        # strip_json_fence's docstring for the full story.
+        result = json.loads(strip_json_fence(extract_text(response)))
     except Exception as exc:  # noqa: BLE001 - deliberate broad catch, LLM call
         logger.warning("decide_next_interaction failed, skipping: %s", exc)
         return None
@@ -165,7 +279,7 @@ async def _extract_clickable_elements(page) -> list[dict]:
     try:
         elements = await page.eval_on_selector_all(
             "a, button",
-            """els => els.slice(0, 60).map(el => ({
+            """els => els.slice(0, 200).map(el => ({
                 text: (el.textContent || el.value || '').trim().slice(0, 80),
                 selector: el.tagName.toLowerCase() + (el.id ? '#' + el.id : ''),
             })).filter(e => e.text.length > 0)""",
@@ -182,19 +296,80 @@ async def _check_infinite_scroll(page) -> bool:
     detectable within a single crawl (no multi-session behavioral data
     needed)."""
     try:
+        initial = await page.evaluate(
+            "() => ({ height: document.body.scrollHeight, viewport: window.innerHeight })"
+        )
+        if initial["height"] <= initial["viewport"]:
+            return False
+        end_indicator_script = """() => {
+            const visible = (el) => {
+                const style = window.getComputedStyle(el);
+                if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) {
+                    return false;
+                }
+                const rect = el.getBoundingClientRect();
+                return rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < window.innerHeight;
+            };
+            const footerSelectors = [
+                'footer',
+                '[role="contentinfo"]',
+                '[id*="footer" i]',
+                '[class*="footer" i]',
+                '[id*="backtotop" i]',
+                '[class*="backtotop" i]'
+            ];
+            if (footerSelectors.some((selector) => {
+                try {
+                    return Array.from(document.querySelectorAll(selector)).some(visible);
+                } catch {
+                    return false;
+                }
+            })) {
+                return true;
+            }
+            const text = (document.body.innerText || '').toLowerCase();
+            return [
+                'zurueck zum seitenanfang',
+                'zurück zum seitenanfang',
+                'back to top',
+                'end of results',
+                'you have reached the end',
+                "you've reached the end",
+                'no more results',
+                'keine weiteren ergebnisse'
+            ].some((phrase) => text.includes(phrase));
+        }"""
         heights = []
-        for _ in range(3):
-            await page.evaluate("window.scrollBy(0, document.body.scrollHeight)")
+        previous_height = initial["height"]
+        growth_steps = 0
+        total_growth = 0
+        min_growth = max(250, initial["viewport"] * 0.25)
+        for _ in range(4):
+            await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
             await asyncio.sleep(0.5)
-            heights.append(await page.evaluate("document.body.scrollHeight"))
-        return len(heights) >= 2 and heights[-1] > heights[0]
+            if await page.evaluate(end_indicator_script):
+                return False
+            current_height = await page.evaluate("document.body.scrollHeight")
+            heights.append(current_height)
+            growth = current_height - previous_height
+            if growth >= min_growth:
+                growth_steps += 1
+                total_growth += growth
+            previous_height = current_height
+        return growth_steps >= 2 and total_growth >= initial["viewport"]
     except Exception as exc:  # noqa: BLE001 - deliberate broad catch, page state can vary
         logger.debug("_check_infinite_scroll failed: %s", exc)
         return False
 
 
 async def _walk_category_flow(
-    page, category: str, snapshot: dict, llm_client=None, max_extra_pages: int = 0
+    page,
+    category: str,
+    snapshot: dict,
+    llm_client=None,
+    max_extra_pages: int = 0,
+    start_time: float | None = None,
+    time_budget_seconds: float | None = None,
 ) -> tuple[dict, list[dict]]:
     """Repeats decide_next_interaction + click for the page's category
     (checkout, cancellation, product, popup, ...) until the flow's own goal
@@ -203,6 +378,11 @@ async def _walk_category_flow(
     of a fixed number of pages per category, which doesn't fit flows of
     very different natural length (a cookie banner vs. a 4-step checkout).
 
+    start_time/time_budget_seconds (both optional, same contract as
+    crawl_site's) let this loop stop starting new steps once the overall
+    crawl budget is exhausted — checked once per iteration, not preemptive,
+    so a click/sleep/snapshot already in flight still runs to completion.
+
     Returns the (possibly updated, if the last step didn't navigate) snapshot
     for the page that was already appended by the caller, plus a list of
     additional page dicts for every step that navigated to a new URL."""
@@ -210,8 +390,14 @@ async def _walk_category_flow(
     for _ in range(MAX_FLOW_STEPS):
         if len(extra_pages) >= max_extra_pages:
             break
+        if (
+            start_time is not None
+            and time_budget_seconds is not None
+            and time.monotonic() - start_time >= time_budget_seconds
+        ):
+            break
         clickable = await _extract_clickable_elements(page)
-        interaction = decide_next_interaction(category, clickable, llm_client=llm_client)
+        interaction = await decide_next_interaction(category, clickable, llm_client=llm_client)
         if not interaction or not interaction.get("target"):
             break
         try:
@@ -220,15 +406,28 @@ async def _walk_category_flow(
                 break
             before_url = page.url
             await el.click(timeout=2000)
-            await asyncio.sleep(1.0)
+            # ponytail: unmeasured guess, not benchmarked against real
+            # scans — matches the settle-wait duration already used for
+            # _check_infinite_scroll's scroll sleeps (site_crawler.py:241);
+            # tune with real timing data if flows still misfire or this
+            # proves wastefully long.
+            await asyncio.sleep(0.5)
+            navigated = page.url != before_url
+            # A real click can navigate into a state _snapshot_page can't
+            # read back cleanly (login/bot wall, stalled AJAX) — its own
+            # SNAPSHOT_TIMEOUT_SECONDS bounds that, and this try/except
+            # treats a timeout the same as any other broken flow step:
+            # stop the flow, keep the last good snapshot, don't fail the
+            # whole crawl over one live-site interaction going sideways.
+            new_snapshot = await _snapshot_page(page, skip_diff_sleep=navigated)
         except Exception as exc:  # noqa: BLE001 - deliberate broad catch, page state can vary
             logger.debug("crawl_site: flow interaction click failed: %s", exc)
             break
 
-        snapshot = await _snapshot_page(page)
-        new_category = classify_page_category(page.url, snapshot["dom_after"], llm_client=llm_client)
+        snapshot = new_snapshot
+        new_category = await classify_page_category(page.url, snapshot["dom_after"], llm_client=llm_client)
 
-        if page.url != before_url:
+        if navigated:
             extra_pages.append(
                 {
                     "url": page.url,
@@ -237,7 +436,12 @@ async def _walk_category_flow(
                     "screenshot": snapshot["screenshot"],
                     "button_styles": snapshot["button_styles"],
                     "contrast_findings": snapshot["contrast_findings"],
+                    "countdown_findings": snapshot["countdown_findings"],
                     "infinite_scroll_detected": False,
+                    "reject_option_missing": snapshot.get("reject_option_missing", False),
+                    "cookie_wall_detected": snapshot.get("cookie_wall_detected", False),
+                    "banner_screenshot": snapshot.get("banner_screenshot"),
+                    "text_boxes": snapshot.get("text_boxes", []),
                 }
             )
 
@@ -256,54 +460,98 @@ async def crawl_site(
     consent_rules_dir: str = DEFAULT_CONSENT_RULES_DIR,
     llm_client=None,
     url_validator=validate_scan_url,
+    time_budget_seconds: float | None = None,
 ) -> dict:
-    """BFS crawl of a whole site starting from start_url, staying within the
+    """DFS crawl of a whole site starting from start_url, staying within the
     start URL's host + subdomains. One shared browser context (one HAR file
     for the whole site). start_url itself is trusted (the caller already
     validated it, same contract as crawl_page) — every link DISCOVERED
     during the crawl is re-validated with `url_validator` before being
-    queued, since those were never seen by the caller."""
+    queued, since those were never seen by the caller.
+
+    time_budget_seconds caps how long the loop keeps discovering/visiting
+    NEW pages (checked once per iteration, not preemptive) — a page already
+    in flight, including its flow-walk, always runs to completion, so actual
+    wall time can exceed the budget by up to one page's worst case."""
     from urllib.parse import urlparse
+
+    if time_budget_seconds is None:
+        override = os.environ.get("SCAN_TIME_BUDGET_SECONDS")
+        time_budget_seconds = (
+            float(override) if override is not None else max_pages * SCAN_SECONDS_PER_PAGE_BUDGET
+        )
+    start_time = time.monotonic()
 
     pathlib.Path(har_dir).mkdir(parents=True, exist_ok=True)
     har_path = str(pathlib.Path(har_dir) / f"site-crawl-{uuid.uuid4().hex}.har")
     context = await browser.new_context(record_har_path=har_path)
 
+    async with httpx.AsyncClient() as robots_client:
+        robots_parser = await fetch_robots_parser(start_url, robots_client)
+    if not robots_parser.can_fetch(USER_AGENT, start_url):
+        await context.close()
+        raise RobotsDisallowedError(start_url)
+
     start_host = urlparse(start_url).hostname or ""
     allowed_hosts = {start_host}
 
-    # Two-tier queue instead of plain FIFO: links predicted (by cheap URL
+    # Two-tier stack instead of plain LIFO: links predicted (by cheap URL
     # heuristic) to hit one of the 3 target categories are visited before
     # everything else, so a big site doesn't burn its whole max_pages budget
-    # on generic pages before reaching checkout/account/product pages.
+    # on generic pages before reaching checkout/account/product pages. Both
+    # tiers are stacks (pop from the end) so the crawl dives depth-first
+    # into a discovered flow instead of fanning out breadth-first.
     priority_queue = [start_url]
     other_queue: list[str] = []
     visited: set[str] = set()
     pages: list[dict] = []
     completed_categories: set[str] = set()
+    # One flow_group id per main-loop iteration, shared by an initial_page
+    # and its flow_pages — lets find_price_increase_in_flow (app/scan.py)
+    # compare prices across the steps of the SAME checkout flow, not across
+    # unrelated pages that happen to be adjacent in the flat `pages` list.
+    flow_group_counter = 0
 
     try:
-        while (priority_queue or other_queue) and len(pages) < max_pages:
-            url = priority_queue.pop(0) if priority_queue else other_queue.pop(0)
+        while (
+            (priority_queue or other_queue)
+            and len(pages) < max_pages
+            and (time.monotonic() - start_time) < time_budget_seconds
+        ):
+            url = priority_queue.pop() if priority_queue else other_queue.pop()
             if url in visited:
                 continue
             visited.add(url)
 
             page = await context.new_page()
             try:
-                await page.goto(url)
+                await page.goto(url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
+                consent_result = await apply_consent_rules(page, consent_rules_dir)
+                # _snapshot_page's own SNAPSHOT_TIMEOUT_SECONDS bounds a page
+                # stuck mid-navigation (login/bot wall, stalled AJAX) —
+                # caught here like any other broken-page load, so one bad
+                # URL is skipped instead of aborting the whole site scan.
+                snapshot = await _snapshot_page(page, consent_result=consent_result, browser=browser)
             except Exception as exc:  # noqa: BLE001 - deliberate broad catch, a dead link shouldn't kill the crawl
                 logger.warning("crawl_site: failed to load %r: %s", url, exc)
                 await page.close()
                 continue
 
-            await apply_consent_rules(page, consent_rules_dir)
-            snapshot = await _snapshot_page(page)
-            category = classify_page_category(url, snapshot["dom_after"], llm_client=llm_client)
-            infinite_scroll = (
-                await _check_infinite_scroll(page) if category in ("product_category", "other") else False
-            )
+            if url == start_url and _looks_like_captcha(snapshot["dom_after"]):
+                await page.close()
+                raise CaptchaRequiredError(url)
 
+            category = await classify_page_category(url, snapshot["dom_after"], llm_client=llm_client)
+            try:
+                infinite_scroll = (
+                    await asyncio.wait_for(_check_infinite_scroll(page), timeout=INFINITE_SCROLL_TIMEOUT_SECONDS)
+                    if category in ("product_category", "other") else False
+                )
+            except asyncio.TimeoutError:
+                logger.warning("crawl_site: _check_infinite_scroll timed out for %r", url)
+                infinite_scroll = False
+
+            flow_group_counter += 1
             initial_page = {
                 "url": url,
                 "category": category,
@@ -311,7 +559,13 @@ async def crawl_site(
                 "screenshot": snapshot["screenshot"],
                 "button_styles": snapshot["button_styles"],
                 "contrast_findings": snapshot["contrast_findings"],
+                "countdown_findings": snapshot["countdown_findings"],
                 "infinite_scroll_detected": infinite_scroll,
+                "reject_option_missing": snapshot["reject_option_missing"],
+                "cookie_wall_detected": snapshot["cookie_wall_detected"],
+                "banner_screenshot": snapshot["banner_screenshot"],
+                "text_boxes": snapshot["text_boxes"],
+                "flow_group": flow_group_counter,
             }
             pages.append(initial_page)
 
@@ -319,27 +573,42 @@ async def crawl_site(
             # (checkout, cancellation, ...) until it's done, not a fixed page
             # count — see _walk_category_flow docstring.
             updated_snapshot, flow_pages = await _walk_category_flow(
-                page, category, snapshot, llm_client=llm_client, max_extra_pages=max_pages - len(pages)
+                page,
+                category,
+                snapshot,
+                llm_client=llm_client,
+                max_extra_pages=max_pages - len(pages),
+                start_time=start_time,
+                time_budget_seconds=time_budget_seconds,
             )
-            initial_page["dom_after"] = updated_snapshot["dom_after"]
-            initial_page["screenshot"] = updated_snapshot["screenshot"]
-            initial_page["button_styles"] = updated_snapshot["button_styles"]
-            initial_page["contrast_findings"] = updated_snapshot["contrast_findings"]
+            if not flow_pages:
+                initial_page["dom_after"] = updated_snapshot["dom_after"]
+                initial_page["screenshot"] = updated_snapshot["screenshot"]
+                initial_page["button_styles"] = updated_snapshot["button_styles"]
+                initial_page["contrast_findings"] = updated_snapshot["contrast_findings"]
+                initial_page["countdown_findings"] = updated_snapshot["countdown_findings"]
+            for flow_page in flow_pages:
+                flow_page["flow_group"] = flow_group_counter
             pages.extend(flow_pages)
             for flow_page in flow_pages:
                 visited.add(flow_page["url"])
             for visited_page in [initial_page, *flow_pages]:
-                if visited_page["category"] in TARGET_CATEGORIES:
+                if visited_page["category"] in DISCOVERY_TARGET_CATEGORIES:
                     completed_categories.add(visited_page["category"])
 
-            all_targets_done = len(completed_categories) >= len(TARGET_CATEGORIES)
+            all_targets_done = len(completed_categories) >= len(DISCOVERY_TARGET_CATEGORIES)
             for link in discover_links(snapshot["dom_after"], url, allowed_hosts):
+                if len(link) > MAX_DISCOVERED_URL_LENGTH:
+                    continue
                 if link in visited or link in priority_queue or link in other_queue:
                     continue
                 try:
                     url_validator(link)
                 except ValueError as exc:
                     logger.info("crawl_site: skipping unsafe discovered link %r: %s", link, exc)
+                    continue
+                if not robots_parser.can_fetch(USER_AGENT, link):
+                    logger.info("crawl_site: skipping robots.txt-disallowed link %r", link)
                     continue
                 predicted = _predict_category_from_url(link)
                 if predicted in TARGET_CATEGORIES:
@@ -356,6 +625,11 @@ async def crawl_site(
 
             await page.close()
     finally:
-        await context.close()  # flushes the HAR file to disk
+        try:
+            # Flushes the HAR file to disk — see CONTEXT_CLOSE_TIMEOUT_SECONDS
+            # docstring above for why this needs a bound.
+            await asyncio.wait_for(context.close(), timeout=CONTEXT_CLOSE_TIMEOUT_SECONDS)
+        except Exception as exc:  # noqa: BLE001 - deliberate broad catch, best-effort HAR flush
+            logger.warning("crawl_site: context.close() timed out or failed (HAR may be incomplete): %s", exc)
 
     return {"pages": pages, "har_path": har_path}

@@ -1,3 +1,5 @@
+import re
+
 from bs4 import BeautifulSoup
 
 
@@ -15,19 +17,35 @@ def find_preticked_checkboxes(dom_html: str) -> list[dict]:
     for box in soup.find_all("input", {"type": "checkbox"}):
         if "checked" not in box.attrs:
             continue
-        if "required" in box.attrs:
-            continue  # a legally required checkbox isn't a dark pattern
+        if "disabled" in box.attrs:
+            continue
+        label_text = _label_text_for(soup, box)
+        if _is_required_cookie_checkbox(box, label_text):
+            continue
+        haystack = _field_haystack(box, label_text)
+        if not _has_preticked_consent_or_addon_context(haystack):
+            continue
+        forced_required = "required" in box.attrs
         findings.append(
             {
                 "pattern_type": "Pre-ticked Box",
-                "confidence_score": 0.9,
-                "evidence_data": {"selector": _selector_for(box)},
+                # A pre-ticked box marked `required` forces the user to keep
+                # consent to proceed at all — more suspicious, not less.
+                "confidence_score": 0.95 if forced_required else 0.9,
+                "evidence_data": {
+                    "selector": _selector_for(box),
+                    "forced_required": forced_required,
+                },
             }
         )
     return findings
 
 
-COUNTDOWN_HINTS = ("countdown", "timer", "deal-timer")
+# ponytail: CSS-Module-generated class name hashes (e.g., "Timer_abc123__label")
+# and Shadow DOM countdowns are not detectable via class/id string matching alone —
+# would need computed-style inspection. Left as-is; add if Computed-Styles data
+# lands from crawl layer.
+COUNTDOWN_HINTS = ("countdown", "timer", "deal-timer", "ablaufzeit", "restlaufzeit", "zaehler", "zähler")
 
 
 def find_countdown_elements(dom_html: str) -> list[dict]:
@@ -48,7 +66,57 @@ def find_countdown_elements(dom_html: str) -> list[dict]:
     return findings
 
 
-_NEGATION_KEYWORDS = ("nicht", "kein", "keine", "not", "don't", "do not")
+_NEGATION_KEYWORDS = (
+    "nicht",
+    "kein",
+    "keine",
+    "ohne",
+    "niemals",
+    "verzicht",
+    "verzichten",
+    "not",
+    "don't",
+    "do not",
+)
+
+# German terms keep the prefix-friendly left boundary for inflections
+# ("verzicht" -> "verzichte"). English terms need full word boundaries:
+# live benchmark false positives showed "not" matching inside "Notes" and
+# "Notwendig".
+_NEGATION_PATTERN = re.compile(
+    r"\b(?:nicht|kein|keine|ohne|niemals|verzicht\w*)"
+    r"|\b(?:not|don't|do not)\b",
+    re.IGNORECASE,
+)
+
+_TRICK_CONTEXT_PATTERN = re.compile(
+    r"\b(?:newsletter|marketing|promo(?:tion)?s?|angebote?|werbung|werbe|"
+    r"tracking|kontakt(?:ieren)?|contact|sms|e-?mail|emails?|abonnieren|subscribe|"
+    r"einwilligung|consent)\b",
+    re.IGNORECASE,
+)
+
+_REQUIRED_COOKIE_PATTERN = re.compile(
+    r"\b(?:technisch notwendig|notwendig|necessary|essential|obligatory|"
+    r"erforderlich|nicht abwählbar|nicht abwaehlbar|always active|immer aktiv)\b",
+    re.IGNORECASE,
+)
+
+_COOKIE_FIELD_PATTERN = re.compile(r"\b(?:cookie\w*|cookies|consent\w*|privacy|datenschutz)\b", re.IGNORECASE)
+_PRETICKED_CONTEXT_PATTERN = re.compile(
+    r"\b(?:"
+    r"newsletter|marketing|werbung|angebote|promotion|promotions|email|e-mail|sms|tracking|"
+    r"cookie\w*|cookies|consent\w*|einwilligung|zustimmung|datenschutz|privacy|agb|terms|"
+    r"zusatz|addon|add-on|extra|versicherung|warranty|garantie|schutzbrief|"
+    r"abo|subscription|subscribe|kostenpflichtig|gebühr|gebuehr|charge|fee|checkout|kasse|bestellung"
+    r")\b",
+    re.IGNORECASE,
+)
+_PASSIVE_CONTROL_PATTERN = re.compile(r"\b(?:toggle|switch|filter|sort|calculator|rechner|roi|billing[-_\s]?cycle)\b", re.IGNORECASE)
+
+
+def _has_negation(text: str) -> bool:
+    return bool(_NEGATION_PATTERN.search(text))
 
 
 def _label_text_for(soup, box) -> str:
@@ -61,6 +129,50 @@ def _label_text_for(soup, box) -> str:
     return parent_label.get_text(strip=True) if parent_label else ""
 
 
+def _field_haystack(box, label_text: str) -> str:
+    parts = [label_text]
+    for attr in ("id", "name", "class", "aria-label"):
+        value = box.get(attr)
+        if isinstance(value, list):
+            parts.extend(value)
+        elif value:
+            parts.append(str(value))
+    for parent in box.find_parents(["form", "fieldset", "section", "div"], limit=3):
+        for attr in ("id", "class", "aria-label"):
+            value = parent.get(attr)
+            if isinstance(value, list):
+                parts.extend(value)
+            elif value:
+                parts.append(str(value))
+        parent_text = parent.get_text(" ", strip=True)
+        if parent_text and parent.name != "form":
+            parts.append(parent_text[:300])
+    return " ".join(parts)
+
+
+def _is_required_cookie_checkbox(box, label_text: str) -> bool:
+    haystack = _field_haystack(box, label_text)
+    return bool(_COOKIE_FIELD_PATTERN.search(haystack) and _REQUIRED_COOKIE_PATTERN.search(haystack))
+
+
+def _has_preticked_consent_or_addon_context(haystack: str) -> bool:
+    if not _PRETICKED_CONTEXT_PATTERN.search(haystack):
+        return False
+    if _PASSIVE_CONTROL_PATTERN.search(haystack) and not re.search(
+        r"\b(?:newsletter|marketing|werbung|tracking|cookie\w*|consent\w*|einwilligung|zustimmung|"
+        r"datenschutz|privacy|agb|terms|zusatz|addon|add-on|extra|versicherung|warranty|garantie|"
+        r"schutzbrief|kostenpflichtig|gebühr|gebuehr|charge|fee)\b",
+        haystack,
+        re.IGNORECASE,
+    ):
+        return False
+    return True
+
+
+def _has_trick_question_context(text_a: str, text_b: str) -> bool:
+    return bool(_TRICK_CONTEXT_PATTERN.search(f"{text_a} {text_b}"))
+
+
 def find_trick_questions(dom_html: str) -> list[dict]:
     """Flags adjacent checkbox pairs whose labels switch polarity (one
     phrased as opt-in, the next as opt-out) — the classic "trick question"
@@ -70,14 +182,15 @@ def find_trick_questions(dom_html: str) -> list[dict]:
     boxes = soup.find_all("input", {"type": "checkbox"})
     labeled = [(box, _label_text_for(soup, box)) for box in boxes]
     labeled = [(box, text) for box, text in labeled if text]
+    labeled = [(box, text) for box, text in labeled if not _is_required_cookie_checkbox(box, text)]
 
     findings = []
     for i in range(len(labeled) - 1):
         box_a, text_a = labeled[i]
         box_b, text_b = labeled[i + 1]
-        negated_a = any(kw in text_a.lower() for kw in _NEGATION_KEYWORDS)
-        negated_b = any(kw in text_b.lower() for kw in _NEGATION_KEYWORDS)
-        if negated_a != negated_b:
+        negated_a = _has_negation(text_a)
+        negated_b = _has_negation(text_b)
+        if negated_a != negated_b and _has_trick_question_context(text_a, text_b):
             findings.append(
                 {
                     "pattern_type": "Trick Questions",
@@ -93,16 +206,248 @@ def find_trick_questions(dom_html: str) -> list[dict]:
     return findings
 
 
+# Narrow, high-precision signal for a single checkbox whose own label text
+# explicitly spells out that NOT checking it results in default consent —
+# e.g. Mailchimp's sign-up checkbox: "I don't want to receive emails...
+# By not checking the box, I agree to be opted in by default." Structurally
+# different from find_trick_questions (needs two adjacent checkboxes with
+# differing polarity) and find_preticked_checkboxes (needs `checked` set) —
+# this one is unchecked and alone, the trick is purely in the wording.
+# Deliberately narrow (both hint groups must co-occur) since a plain
+# opt-out checkbox ("Ich möchte keine Werbung erhalten") never needs to
+# state its own default-consequence — spelling that out is itself the tell.
+_NOT_CHECKING_HINTS = (
+    "not checking", "don't check", "do not check", "not check the box",
+    "nicht ankreuzt", "nicht anklickst", "nicht aktivierst", "nicht markierst",
+)
+_DEFAULT_CONSENT_HINTS = (
+    "by default", "automatically opted in", "automatically subscribed", "opted in by default",
+    "automatisch angemeldet", "automatisch abonniert", "standardmäßig", "per voreinstellung", "voreingestellt",
+)
+
+
+def find_default_consent_checkboxes(dom_html: str) -> list[dict]:
+    """Flags a single checkbox whose label text explicitly states that
+    leaving it unchecked results in default consent — see module comment
+    above for the Mailchimp example this mirrors."""
+    soup = BeautifulSoup(dom_html, "html.parser")
+    findings = []
+    for box in soup.find_all("input", {"type": "checkbox"}):
+        text = _label_text_for(soup, box).lower()
+        if not text:
+            continue
+        if any(h in text for h in _NOT_CHECKING_HINTS) and any(h in text for h in _DEFAULT_CONSENT_HINTS):
+            findings.append(
+                {
+                    "pattern_type": "Trick Questions",
+                    "confidence_score": 0.85,
+                    "evidence_data": {
+                        "selector": _selector_for(box),
+                        "quote": _label_text_for(soup, box),
+                    },
+                }
+            )
+    return findings
+
+
 def find_autoplay_media(dom_html: str) -> list[dict]:
     soup = BeautifulSoup(dom_html, "html.parser")
     findings = []
     for tag in soup.find_all(("video", "audio")):
         if "autoplay" in tag.attrs:
+            if _is_muted_background_video(tag):
+                continue
             findings.append(
                 {
                     "pattern_type": "Exploiting Addiction (Autoplay)",
-                    "confidence_score": 0.6,
+                    # Below pipeline.MIN_CONFIDENCE on its own — a single
+                    # autoplay attribute is a weak, generic signal; needs
+                    # the co-occurrence boost from another finding on the
+                    # same page to be reported.
+                    "confidence_score": 0.5,
                     "evidence_data": {"selector": _selector_for(tag)},
                 }
             )
+    return findings
+
+
+def _is_muted_background_video(tag) -> bool:
+    if tag.name != "video":
+        return False
+    classes = " ".join(tag.get("class", []))
+    return (
+        "muted" in tag.attrs
+        and "controls" not in tag.attrs
+        and "background" in classes.lower()
+    )
+
+
+# ponytail: only catches "sibling containers each holding a price + a
+# <ul>/<ol> of items" shape (div/li cards). Misses <table>-based pricing
+# grids, CSS-grid layouts using <div> rows instead of <li>, prices split
+# across multiple text nodes, and non-EUR currencies. Also takes the *last*
+# price match in a container as "the" price, so strikethrough/original-price
+# markup can pick the wrong number. Upgrade path: if false negatives show up
+# on real scans, add a <table> row detector and a currency-agnostic amount
+# regex; not worth building speculatively now.
+_PRICE_PATTERN = re.compile(
+    r"(?:€\s?(\d{1,3}(?:\.\d{3})*,\d{2})|"
+    r"(\d{1,3}(?:\.\d{3})*,\d{2})\s?€|"
+    r"EUR\s?(\d{1,3}(?:\.\d{3})*,\d{2})|"
+    r"(\d{1,3}(?:\.\d{3})*,\d{2})\s?EUR)",
+    re.IGNORECASE,
+)
+
+
+def _parse_price(match: re.Match) -> float:
+    raw = next(g for g in match.groups() if g)
+    return float(raw.replace(".", "").replace(",", "."))
+
+
+def _tier_container(tag):
+    """Walks up to 4 levels from a price-bearing tag to find the nearest
+    ancestor that also contains a <ul>/<ol> with at least one <li> — the
+    "tier container" for that price."""
+    node = tag
+    for _ in range(4):
+        if node is None:
+            return None
+        list_tag = node.find(("ul", "ol"))
+        if list_tag is not None and list_tag.find("li") is not None:
+            return node, list_tag
+        node = node.parent
+    return None
+
+
+def find_decoy_pricing(dom_html: str) -> list[dict]:
+    soup = BeautifulSoup(dom_html, "html.parser")
+
+    tiers = {}  # container tag id -> (container, price, value_count)
+    for tag in soup.find_all(True):
+        matches = list(_PRICE_PATTERN.finditer(tag.get_text()))
+        if not matches:
+            continue
+        result = _tier_container(tag)
+        if result is None:
+            continue
+        container, list_tag = result
+        if id(container) in tiers:
+            continue
+        price = _parse_price(matches[-1])
+        value_count = len(list_tag.find_all("li"))
+        tiers[id(container)] = (container, price, value_count)
+
+    # Only keep containers that are siblings of another tier container
+    # (real pricing tables render as a row of sibling cards).
+    by_parent: dict = {}
+    for container, price, value_count in tiers.values():
+        by_parent.setdefault(id(container.parent), []).append((container, price, value_count))
+
+    findings = []
+    for group in by_parent.values():
+        if len(group) < 2:
+            continue
+        group.sort(key=lambda t: t[1])
+        for (cheaper, cheaper_price, cheaper_count), (pricier, pricier_price, pricier_count) in zip(
+            group, group[1:]
+        ):
+            price_delta_pct = (pricier_price - cheaper_price) / cheaper_price
+            value_ratio = pricier_count / max(cheaper_count, 1)
+            if price_delta_pct <= 0.15 and value_ratio >= 3.0:
+                findings.append(
+                    {
+                        "pattern_type": "Decoy Pricing",
+                        # Below pipeline.MIN_CONFIDENCE on its own — same
+                        # reasoning as autoplay above.
+                        "confidence_score": 0.5,
+                        "evidence_data": {
+                            "cheaper_selector": _selector_for(cheaper),
+                            "pricier_selector": _selector_for(pricier),
+                            "cheaper_price": cheaper_price,
+                            "pricier_price": pricier_price,
+                            "cheaper_value_count": cheaper_count,
+                            "pricier_value_count": pricier_count,
+                            "price_delta_pct": round(price_delta_pct, 3),
+                            "value_ratio": round(value_ratio, 2),
+                        },
+                    }
+                )
+    return findings
+
+
+# Schwellen für find_price_increase_in_flow: ein Preisanstieg zählt nur,
+# wenn er sowohl relativ (5%) als auch absolut (0,50€) spürbar ist —
+# reines Rundungsrauschen (z.B. 49,99€ -> 50,00€) soll nicht als Fund
+# zählen.
+_PRICE_INCREASE_MIN_PCT = 0.05
+_PRICE_INCREASE_MIN_ABS = 0.50
+
+
+def find_price_increase_in_flow(flow_group_pages: list[dict]) -> list[dict]:
+    """Vergleicht die SUMME aller im Text gefundenen Preisnennungen (Proxy
+    für 'was der Nutzer insgesamt zahlt', deckt genau den Fall ab, dass
+    eine neue Position wie eine Servicegebühr erst auf einem späteren
+    Schritt dazukommt — nicht nur einen einzelnen größten Betrag, der eine
+    neue Zusatzzeile übersehen würde) zwischen dem ersten und jedem
+    folgenden Schritt eines Checkout-Flows.
+
+    ponytail: keine echte 'Gesamtsumme'-Semantik — wenn eine Seite denselben
+    Preis zweimal anzeigt (z.B. Kachel + Zusammenfassung), zählt er doppelt;
+    Upgrade-Pfad: ein <table>/Summenzeilen-Detektor, falls reale Scans zu
+    viele Fehltreffer zeigen."""
+    if len(flow_group_pages) < 2:
+        return []
+
+    def _sum_prices(dom_html: str) -> float | None:
+        matches = list(_PRICE_PATTERN.finditer(dom_html))
+        if not matches:
+            return None
+        return sum(_parse_price(m) for m in matches)
+
+    baseline_price = _sum_prices(flow_group_pages[0]["dom_after"])
+    if baseline_price is None:
+        return []
+
+    findings = []
+    # reference_price tracks the last price a finding was raised against
+    # (starts at the baseline) — comparing every later step back to the
+    # ORIGINAL baseline would re-flag a step that's merely still elevated
+    # by an already-reported fee (no *further* increase happened) as a
+    # second, duplicate finding for the same underlying jump.
+    reference_price = baseline_price
+    for later_index in range(1, len(flow_group_pages)):
+        later_price = _sum_prices(flow_group_pages[later_index]["dom_after"])
+        if later_price is None:
+            continue
+        delta = later_price - reference_price
+        if delta <= 0:
+            continue
+        # A genuinely free (0,00€) starting step — real for trial-then-fee
+        # patterns — makes "percent increase" undefined; any real absolute
+        # jump off a free baseline is significant on its own, so the
+        # percentage gate is skipped rather than dividing by zero.
+        delta_pct = (delta / reference_price) if reference_price > 0 else float("inf")
+        if delta_pct < _PRICE_INCREASE_MIN_PCT or delta < _PRICE_INCREASE_MIN_ABS:
+            continue
+        findings.append(
+            {
+                "pattern_type": "Sneaking / Hidden Costs",
+                "confidence_score": 0.75,
+                "evidence_data": {
+                    "note": (
+                        f"Preis stieg von {baseline_price:.2f}€ (Schritt 1) auf "
+                        f"{later_price:.2f}€ (Schritt {later_index + 1}) ohne "
+                        "vorherige Offenlegung."
+                    ),
+                    "baseline_price": round(baseline_price, 2),
+                    "later_price": round(later_price, 2),
+                    "price_increase_pct": (
+                        round((later_price - baseline_price) / baseline_price, 3) if baseline_price > 0 else None
+                    ),
+                    "baseline_page_index": 0,
+                    "later_page_index": later_index,
+                },
+            }
+        )
+        reference_price = later_price
     return findings

@@ -3,37 +3,105 @@
 <head>
 <meta charset="utf-8">
 <style>
-  body { font-family: sans-serif; margin: 20px; }
-  h1 { font-size: 18px; margin-bottom: 20px; }
+  /* Kali brand palette, matching frontend/src/index.css's .kali-light theme
+     (cream/olive-gold) — kept as plain hex, WeasyPrint has no build step. */
+  body { font-family: -apple-system, "Segoe UI", sans-serif; margin: 20px; color: #151514; }
+  .cover { text-align: center; padding: 60px 0; page-break-after: always; background: #F4EEE1; }
+  .cover .brand { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 24px; }
+  .cover .brand img { width: 40px; height: 40px; }
+  .cover .brand span { font-family: Georgia, serif; font-weight: 700; font-size: 24px; letter-spacing: 4px; color: #8D9518; }
+  .cover h1 { font-size: 22px; margin-bottom: 8px; }
+  .cover .score { font-size: 40px; font-weight: 700; margin: 20px 0; }
+  h1 { font-size: 18px; margin-bottom: 20px; border-bottom: 2px solid #8D9518; padding-bottom: 6px; }
   table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-  th, td { border: 1px solid #999; padding: 8px; text-align: left; font-size: 12px; }
-  th { background-color: #f0f0f0; font-weight: bold; }
+  th, td { border: 1px solid #D8D5CA; padding: 8px; text-align: left; font-size: 12px; }
+  th { background-color: #8D9518; color: #fff; font-weight: bold; }
+  tr:nth-child(even) td { background: #F4EEE1; }
   .citation { display: block; margin-top: 4px; padding-top: 4px; border-top: 1px solid #ddd; font-size: 11px; color: #666; font-style: italic; }
+  .hint { color: #666; font-size: 12px; font-style: italic; }
   .evidence { word-break: break-word; }
 </style>
 </head>
 <body>
+  {% if risk %}
+  <style>
+    .badge-niedrig { color: #1a7f37; }
+    .badge-mittel { color: #b35c00; }
+    .badge-hoch { color: #c9302c; }
+  </style>
+  <div class="cover">
+    <div class="brand"><img src="{{ logo }}" alt="Kali"><span>KALI</span></div>
+    <h1>Dark-Pattern-Prüfbericht</h1>
+    <p>{{ url }}</p>
+    <div class="score badge-{{ risk.level }}">{{ "%.2f"|format(risk.score) }} — {{ risk.level }}</div>
+    <p>{{ findings|length }} Funde</p>
+    <p class="hint">Automatisierte Ersteinschätzung — kein Rechtsrat, Einzelfallprüfung erforderlich.</p>
+  </div>
+  {% endif %}
+
+  {% if by_norm %}
+  <h1>Zusammenfassung nach Rechtsnorm</h1>
+  <table>
+    <tr><th>Rechtsnorm</th><th>Anzahl Funde</th></tr>
+    {% for norm, count in by_norm.items() %}
+    <tr><td>{{ norm }}</td><td>{{ count }}</td></tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+
   <h1>Dark-Pattern-Prüfbericht: {{ url }}</h1>
   <table>
     <tr>
       <th>Pattern-Typ</th>
       <th>Rechtsnorm</th>
       <th>Confidence</th>
+      <th>Auswirkung</th>
+      <th>Link</th>
+      <th>Zeit</th>
+      <th>Screenshot</th>
       <th>Beleg</th>
+      <th>Review-Status</th>
     </tr>
     {% for f in findings %}
     <tr>
       <td>{{ f.pattern_type }}</td>
       <td>{{ f.target_norm }}</td>
       <td>{{ "%.2f"|format(f.confidence_score) }}</td>
+      <td>{{ f.evidence_data.get("impact") or "–" }}</td>
+      <td>{{ f.page_url or "–" }}</td>
+      <td>{{ f.created_at }}</td>
+      <td>
+        {% if f.evidence_data.get("screenshot_annotated_data_uri") %}
+        <img src="{{ f.evidence_data.get('screenshot_annotated_data_uri') }}" alt="Screenshot mit markierter Textstelle" style="max-width:150px;border:1px solid #D8D5CA;">
+        {% elif f.evidence_data.get("screenshot_data_uri") %}
+        <img src="{{ f.evidence_data.get('screenshot_data_uri') }}" alt="Screenshot" style="max-width:150px;border:1px solid #D8D5CA;">
+        {% else %}
+        {{ f.screenshot_url or "–" }}
+        {% endif %}
+        {% if f.evidence_data.get("banner_screenshot_data_uri") %}
+        <br><span class="hint">Cookie-Banner vorher:</span><br>
+        <img src="{{ f.evidence_data.get('banner_screenshot_data_uri') }}" alt="Cookie-Banner vor dem Schließen" style="max-width:150px;border:1px solid #D8D5CA;">
+        {% endif %}
+        {% if f.evidence_data.get("baseline_screenshot_data_uri") %}
+        <br><span class="hint">Preis davor:</span><br>
+        <img src="{{ f.evidence_data.get('baseline_screenshot_data_uri') }}" alt="Preis vor dem Anstieg" style="max-width:150px;border:1px solid #D8D5CA;">
+        {% endif %}
+      </td>
       <td>
         <div class="evidence">
           {{ f.evidence_data.get("quote") or f.evidence_data.get("selector") or "" }}
           {% if f.evidence_data.get("citation") %}
           <span class="citation">{{ f.evidence_data.get("citation") }}</span>
           {% endif %}
+          {% if evidence_hints is defined and evidence_hints.get(f.pattern_type) %}
+          <span class="citation">{{ evidence_hints.get(f.pattern_type) }}</span>
+          {% endif %}
+          {% if f.evidence_data.get("clock_verified") %}
+          <span class="citation">{{ f.evidence_data.get("clock_verified") }}</span>
+          {% endif %}
         </div>
       </td>
+      <td>{{ f.human_review or "ungeprüft" }}</td>
     </tr>
     {% endfor %}
   </table>

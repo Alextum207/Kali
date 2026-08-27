@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<title>Pattern-Highlighter Testseite: Fehlende Reject-Option</title>
+</head>
+<body>
+<h1>Fehlende Reject-Option (Cookie-Banner)</h1>
+<p>Separat von <code>test-page.html</code>, weil <code>checkCookieBanner()</code>
+   nach der ersten präsent-bestätigten Regel abbricht — dieses Muster nutzt
+   die manuelle QA-Testregel aus <code>build_consent_rules.py</code>
+   (<code>kali-qa-missing-reject</code>), kein reales Consent-O-Matic-Rule.</p>
+
+<div id="kali-qa-cookie-banner-no-reject">
+  <p>Wir nutzen Cookies, um dein Erlebnis zu verbessern.</p>
+  <button>Accept all</button>
+</div>
+
+</body>
+</html>

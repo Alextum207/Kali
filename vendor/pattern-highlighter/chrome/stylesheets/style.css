@@ -1,0 +1,47 @@
+.__ph__debug-box {
+    /** background-color: red !important; **/
+    border: 2px solid black !important;
+}
+
+.__ph__info-icon {
+    position: absolute;
+    z-index: 2147483647;
+    font-size: 14px;
+}
+
+.__ph__info-icon > summary {
+    display: block;
+    list-style: none;
+    cursor: pointer;
+    width: 22px;
+    height: 22px;
+    line-height: 22px;
+    text-align: center;
+    font-size: 18px;
+}
+
+.__ph__info-icon > summary::-webkit-details-marker {
+    display: none;
+}
+
+.__ph__info-icon > p,
+.__ph__info-icon > a {
+    font-family: -apple-system, "Segoe UI", sans-serif;
+    font-size: 13px;
+    color: #111;
+}
+
+.__ph__info-icon > p {
+    max-width: 260px;
+    margin: 4px 0 0;
+    padding: 8px;
+    background: #fff;
+    border: 1px solid #333;
+    border-radius: 4px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+
+.__ph__info-icon > a {
+    display: inline-block;
+    margin-top: 4px;
+}

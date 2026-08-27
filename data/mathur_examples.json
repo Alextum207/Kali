@@ -1,11 +1,7 @@
 [
-  {"text": "Only 2 items left in stock, order now!", "pattern_type": "Fake Urgency"},
-  {"text": "1,204 people are looking at this deal right now", "pattern_type": "Fake Social Proof"},
   {"text": "Are you sure? Only fools would pass up this discount.", "pattern_type": "Confirm Shaming"},
   {"text": "No thanks, I don't want to save money on my order.", "pattern_type": "Confirm Shaming"},
-  {"text": "This offer expires in 24 hours and will never return.", "pattern_type": "Fake Urgency"},
   {"text": "By continuing you agree to receive our newsletter, partner offers, and SMS updates.", "pattern_type": "Sneaking / Hidden Costs"},
-  {"text": "Ihr Abo verlängert sich automatisch, sofern Sie nicht rechtzeitig kündigen.", "pattern_type": "Forced Continuity"},
   {"text": "This offer will not come back once this session ends.", "pattern_type": "Nagging"},
   {"text": "Ihre Kündigung ist nur telefonisch während unserer Geschäftszeiten möglich.", "pattern_type": "Roach Motel"},
   {"text": "Um fortzufahren, registrieren Sie sich bitte zunächst kostenlos.", "pattern_type": "Forced Path"},
