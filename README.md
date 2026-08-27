@@ -150,10 +150,17 @@ an, unabhängig vom Backend.
 
 ### Weg B: Online (Render)
 
-Die deployte Version läuft unter der im Repo hinterlegten Render-URL (siehe
-`render.yaml`). Funktioniert genauso wie Weg A, Schritte 5–8 — nur ohne
-eigene Installation. Ein "Cold Start" von bis zu ~30 Sekunden beim ersten
-Aufruf nach längerer Inaktivität ist normal (kostenlose Render-Instanz).
+**Backend/Dashboard:** https://kali-dark-pattern-monitor.onrender.com/ —
+funktioniert genauso wie Weg A, Schritte 5–8, nur ohne eigene Installation.
+Ein "Cold Start" von bis zu ~30 Sekunden beim ersten Aufruf nach längerer
+Inaktivität ist normal (kostenlose Render-Instanz).
+
+**Frontend:** https://kali-frontend.onrender.com/ — Stand jetzt liefert
+diese URL einen 503-Fehler (kein Cold-Start-Zwischenstand, mehrfach
+geprüft). Vor der Vorführung im Render-Dashboard die Build-Logs des
+`kali-frontend`-Static-Site-Deploys prüfen. Bis das behoben ist: das
+Backend-Dashboard oben (Weg A/B) oder das lokale Frontend (Abschnitt
+"Frontend" unten) nutzen.
 
 ### Frontend (optional, React/Vite statt der eingebauten Oberfläche)
 
