@@ -233,7 +233,11 @@ JSON-API (`GET /api/scans`, `/api/scans/{id}`,
 `/api/scans/{id}/pages/{id}`, `app/main.py`) über CORS an
 (`FRONTEND_ORIGIN`-Env-Var, Default `http://localhost:8080`). Die Routen
 sind dünne Wrapper um die bestehenden `app/db.py`-Funktionen inkl.
-`_attach_display_fields`. `frontend/src/lib/api.ts` ist der Client dazu,
-wird aber noch **nirgends** aufgerufen — `Dashboard.tsx`/`CaseAnalysis.tsx`
-laufen weiterhin mit hartcodierten Mock-Daten, das Verdrahten auf echte
-Daten ist ein offener Folge-Schritt.
+`_attach_display_fields`. `frontend/src/lib/api.ts` ist der Client dazu.
+Stand 2026-08-26: sowohl `CaseAnalysis.tsx` (Scan starten + pollen) als
+auch `Dashboard.tsx` (Case-Liste via `getScans()`) laufen auf echten
+Daten. Offen bleibt nur das Verdrahten der "Confirm for review"/"Dismiss
+finding"-Buttons in `CaseAnalysis.tsx` — der einzige Backend-Endpunkt dafür
+(`POST /scans/{id}/findings/{id}/review`) ist Form-encoded/redirect, kein
+JSON-Pendant, und der Review-Block müsste zudem pro Finding statt einmalig
+platziert werden.

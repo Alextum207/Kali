@@ -18,7 +18,7 @@ Stand: 2026-08-24
 - Eine Start-URL reicht — BFS/priorisierter Crawl folgt `<a href>`-Links automatisch, bleibt auf Host + Subdomains
 - Kategorie-Priorisierung: Checkout/Konto/Produkt-Seiten werden vor generischen Seiten besucht (`TARGET_CATEGORIES`, `_predict_category_from_url`)
 - Mehrstufiger Flow-Walk: klickt sich LLM-gesteuert durch echte Abläufe durch (z.B. bis zum letzten Checkout-Schritt vor Zahlung, oder sucht einen Kündigungslink) statt nur einzelne Seiten zu laden
-- Zeit-Budget (`SCAN_TIME_BUDGET_SECONDS`) + `max_pages`-Deckel als Notbremsen
+- Zeit-Budget (`SCAN_SECONDS_PER_PAGE_BUDGET` × `max_pages`, Override via `SCAN_TIME_BUDGET_SECONDS`) + `max_pages`-Deckel als Notbremsen
 - SSRF-Schutz (`app/url_safety.py`): blockt private IPs, Cloud-Metadata, `file://` etc.
 - CAPTCHA-Erkennung mit sauberem Abbruch (`CaptchaRequiredError`)
 - Cookie-Consent wird vor jedem Snapshot automatisiert behandelt (Consent-O-Matic-Regeln)
@@ -29,7 +29,7 @@ Stand: 2026-08-24
 |---|---|
 | **Kein `robots.txt`-Respekt** | Aktuell wird jede erlaubte URL gecrawlt, unabhängig von `Disallow`-Regeln — rechtlich/ethisch für einen produktiven Marktbeobachtungs-Crawler eigentlich Pflicht. |
 | **Kein Rate-Limiting/Crawl-Delay** | Der Crawler feuert Requests so schnell wie Playwright sie abarbeitet, ohne Pause zwischen Seiten — Risiko, als Angriffs-Traffic geblockt zu werden oder eine kleine Seite zu überlasten. |
-| **Kein Login/Auth-Flow** | Viele Dark Patterns (echte Kündigungs-Flows, personalisierte Rabatt-Timer, Account-Löschung) liegen hinter einem Login — der Crawler kommt nur an öffentlich erreichbare Seiten. Bräuchte Credential-Handling + Playwright `storage_state` (Session-Cookies vorab injizieren). |
+| **Kein Login/Auth-Flow** | Viele Dark Patterns (echte Kündigungs-Flows, personalisierte Rabatt-Timer, Account-Löschung) liegen hinter einem Login — der Crawler kommt nur an öffentlich erreichbare Seiten. Bräuchte Credential-Handling + Playwright `storage_state` (Session-Cookies vorab injizieren). Rechtlich unkritisch, solange mit eigenen, legitim erstellten Test-Accounts eingeloggt wird (entspricht dem manuellen "Mystery Shopping", das Verbraucherzentralen bereits praktizieren) — **kein** automatisiertes Login mit fremden/gestohlenen Zugangsdaten oder Umgehen von Zugangssicherungen (das wäre § 202a StGB). Verstöße gegen AGB/ToS von Anbietern gegen automatisierte Zugriffe sind ein zivilrechtliches, kein strafrechtliches Risiko. |
 | **Keine `sitemap.xml`-Nutzung** | Nur `<a href>`-Links werden gefunden — Seiten, die nur über eine Sitemap oder JS-generierte Navigation (ohne echte `<a>`-Tags, z.B. reine `onClick`-Router-Links in SPAs) erreichbar sind, werden übersehen. |
 | **Keine Pagination-Erkennung** | Ein "Nächste Seite"-Button in einer Produktliste wird wie jeder andere Link behandelt (nicht priorisiert/spezialbehandelt) — bei sehr langen Katalogen kann das Budget vor relevanten Unterseiten aufgebraucht sein. |
 | **Kein Resume/Checkpointing** | Bricht ein Scan (Timeout, Absturz) mitten im Crawl ab, ist der Fortschritt weg — kein persistenter Warteschlangen-State, der einen Scan fortsetzen könnte. |

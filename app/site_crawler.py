@@ -20,7 +20,7 @@ from app.crawler import (
 )
 import httpx
 
-from app.llm_utils import extract_text
+from app.llm_utils import extract_text, strip_json_fence
 from app.robots import USER_AGENT, RobotsDisallowedError, fetch_robots_parser
 from app.url_safety import validate_scan_url
 
@@ -78,9 +78,40 @@ _CATEGORY_KEYWORDS = {
 # not link targets to steer toward) — used to prioritize the crawl queue.
 TARGET_CATEGORIES = (CHECKOUT_PAYMENT_CATEGORY, "account_subscription", "product_category")
 
+# TARGET_CATEGORIES (URL-vorhersagbar) + popup_leadform: dieselbe
+# "genug gefunden"-Schwelle, die generische Links weiterverfolgt, bis alle
+# hier gelistet Kategorien mindestens einmal gesehen wurden — popup_leadform
+# ist nicht URL-vorhersagbar (kein Eintrag in _CATEGORY_KEYWORDS), taucht
+# aber wie die 3 TARGET_CATEGORIES nur durch zusätzliche Seiten-Discovery
+# auf, nicht automatisch wie cookie_consent (das läuft über
+# apply_consent_rules auf JEDER Seite, braucht daher keine eigene
+# Discovery-Garantie). Ohne diese Erweiterung wurden generische Links nach
+# Erreichen der 3 TARGET_CATEGORIES sofort verworfen — eine Popup-Seite, die
+# erst danach entdeckt wurde, wurde nie besucht.
+DISCOVERY_TARGET_CATEGORIES = TARGET_CATEGORIES + ("popup_leadform",)
+
 # Safety cap on decide_next_interaction/click loops within one category flow
 # (e.g. multi-step checkout) — a ceiling against dead-loop pages, not a goal.
 MAX_FLOW_STEPS = int(os.environ.get("MAX_FLOW_STEPS", "3"))
+
+# _check_infinite_scroll's page.evaluate() calls have no timeout of their
+# own and it's called outside crawl_site's nearby try/except, so a stalled
+# page can hang it forever with nothing to catch it. Same reasoning as
+# CONSENT_TIMEOUT_SECONDS in app/crawler.py.
+INFINITE_SCROLL_TIMEOUT_SECONDS = int(os.environ.get("INFINITE_SCROLL_TIMEOUT_SECONDS", "10"))
+
+# Per-page share of the overall scan time budget (see crawl_site) — scales
+# the budget with max_pages instead of a fixed value that cuts the
+# discovery loop off after 1-2 pages once max_pages is more than a handful.
+SCAN_SECONDS_PER_PAGE_BUDGET = float(os.environ.get("SCAN_SECONDS_PER_PAGE_BUDGET", "25"))
+
+# ponytail: fixed length cap, not loop detection — a self-referencing
+# redirect param (e.g. Amazon's preferencesReturnUrl, which re-encodes the
+# current URL into itself on every hop) grows monotonically each hop, so
+# this catches it generically after 1-2 hops without needing to
+# special-case any one site's param name. Upgrade to real cycle detection
+# if a legitimate long URL ever gets caught by this.
+MAX_DISCOVERED_URL_LENGTH = 512
 
 # context.close() (which flushes the HAR file) can itself hang on a real,
 # heavy site — confirmed against amazon.de: after several pages generating
@@ -218,12 +249,23 @@ async def decide_next_interaction(category: str, clickable_elements: list[dict],
         'für das nächste sinnvolle Element, oder {"type": "none"}, falls kein Element zum Ziel passt.'
     )
     try:
+        # max_tokens=1024 (not the earlier 200): a judgment call among up to
+        # 40 candidate elements is more reasoning-heavy than e.g.
+        # _llm_classify_category's one-word answer, worth the headroom.
         response = await llm_client.messages.create(
             model="claude-sonnet-5",
-            max_tokens=200,
+            max_tokens=1024,
             messages=[{"role": "user", "content": prompt}],
         )
-        result = json.loads(extract_text(response))
+        # Confirmed live against temu.com: despite "AUSSCHLIESSLICH ein
+        # JSON-Objekt", the model sometimes wraps its answer in a Markdown
+        # code fence anyway ('```json\n{"type": "none"}\n```') —
+        # json.loads on that raises "Expecting value: line 1 column 1
+        # (char 0)" since a backtick isn't a valid JSON start character.
+        # That silently meant "no interaction" for every category on every
+        # page whenever the model happened to fence its answer. See
+        # strip_json_fence's docstring for the full story.
+        result = json.loads(strip_json_fence(extract_text(response)))
     except Exception as exc:  # noqa: BLE001 - deliberate broad catch, LLM call
         logger.warning("decide_next_interaction failed, skipping: %s", exc)
         return None
@@ -254,12 +296,67 @@ async def _check_infinite_scroll(page) -> bool:
     detectable within a single crawl (no multi-session behavioral data
     needed)."""
     try:
+        initial = await page.evaluate(
+            "() => ({ height: document.body.scrollHeight, viewport: window.innerHeight })"
+        )
+        if initial["height"] <= initial["viewport"]:
+            return False
+        end_indicator_script = """() => {
+            const visible = (el) => {
+                const style = window.getComputedStyle(el);
+                if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) {
+                    return false;
+                }
+                const rect = el.getBoundingClientRect();
+                return rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < window.innerHeight;
+            };
+            const footerSelectors = [
+                'footer',
+                '[role="contentinfo"]',
+                '[id*="footer" i]',
+                '[class*="footer" i]',
+                '[id*="backtotop" i]',
+                '[class*="backtotop" i]'
+            ];
+            if (footerSelectors.some((selector) => {
+                try {
+                    return Array.from(document.querySelectorAll(selector)).some(visible);
+                } catch {
+                    return false;
+                }
+            })) {
+                return true;
+            }
+            const text = (document.body.innerText || '').toLowerCase();
+            return [
+                'zurueck zum seitenanfang',
+                'zurück zum seitenanfang',
+                'back to top',
+                'end of results',
+                'you have reached the end',
+                "you've reached the end",
+                'no more results',
+                'keine weiteren ergebnisse'
+            ].some((phrase) => text.includes(phrase));
+        }"""
         heights = []
-        for _ in range(3):
-            await page.evaluate("window.scrollBy(0, document.body.scrollHeight)")
+        previous_height = initial["height"]
+        growth_steps = 0
+        total_growth = 0
+        min_growth = max(250, initial["viewport"] * 0.25)
+        for _ in range(4):
+            await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
             await asyncio.sleep(0.5)
-            heights.append(await page.evaluate("document.body.scrollHeight"))
-        return len(heights) >= 2 and heights[-1] > heights[0]
+            if await page.evaluate(end_indicator_script):
+                return False
+            current_height = await page.evaluate("document.body.scrollHeight")
+            heights.append(current_height)
+            growth = current_height - previous_height
+            if growth >= min_growth:
+                growth_steps += 1
+                total_growth += growth
+            previous_height = current_height
+        return growth_steps >= 2 and total_growth >= initial["viewport"]
     except Exception as exc:  # noqa: BLE001 - deliberate broad catch, page state can vary
         logger.debug("_check_infinite_scroll failed: %s", exc)
         return False
@@ -379,7 +476,10 @@ async def crawl_site(
     from urllib.parse import urlparse
 
     if time_budget_seconds is None:
-        time_budget_seconds = float(os.environ.get("SCAN_TIME_BUDGET_SECONDS", "25"))
+        override = os.environ.get("SCAN_TIME_BUDGET_SECONDS")
+        time_budget_seconds = (
+            float(override) if override is not None else max_pages * SCAN_SECONDS_PER_PAGE_BUDGET
+        )
     start_time = time.monotonic()
 
     pathlib.Path(har_dir).mkdir(parents=True, exist_ok=True)
@@ -442,9 +542,14 @@ async def crawl_site(
                 raise CaptchaRequiredError(url)
 
             category = await classify_page_category(url, snapshot["dom_after"], llm_client=llm_client)
-            infinite_scroll = (
-                await _check_infinite_scroll(page) if category in ("product_category", "other") else False
-            )
+            try:
+                infinite_scroll = (
+                    await asyncio.wait_for(_check_infinite_scroll(page), timeout=INFINITE_SCROLL_TIMEOUT_SECONDS)
+                    if category in ("product_category", "other") else False
+                )
+            except asyncio.TimeoutError:
+                logger.warning("crawl_site: _check_infinite_scroll timed out for %r", url)
+                infinite_scroll = False
 
             flow_group_counter += 1
             initial_page = {
@@ -476,22 +581,25 @@ async def crawl_site(
                 start_time=start_time,
                 time_budget_seconds=time_budget_seconds,
             )
-            initial_page["dom_after"] = updated_snapshot["dom_after"]
-            initial_page["screenshot"] = updated_snapshot["screenshot"]
-            initial_page["button_styles"] = updated_snapshot["button_styles"]
-            initial_page["contrast_findings"] = updated_snapshot["contrast_findings"]
-            initial_page["countdown_findings"] = updated_snapshot["countdown_findings"]
+            if not flow_pages:
+                initial_page["dom_after"] = updated_snapshot["dom_after"]
+                initial_page["screenshot"] = updated_snapshot["screenshot"]
+                initial_page["button_styles"] = updated_snapshot["button_styles"]
+                initial_page["contrast_findings"] = updated_snapshot["contrast_findings"]
+                initial_page["countdown_findings"] = updated_snapshot["countdown_findings"]
             for flow_page in flow_pages:
                 flow_page["flow_group"] = flow_group_counter
             pages.extend(flow_pages)
             for flow_page in flow_pages:
                 visited.add(flow_page["url"])
             for visited_page in [initial_page, *flow_pages]:
-                if visited_page["category"] in TARGET_CATEGORIES:
+                if visited_page["category"] in DISCOVERY_TARGET_CATEGORIES:
                     completed_categories.add(visited_page["category"])
 
-            all_targets_done = len(completed_categories) >= len(TARGET_CATEGORIES)
+            all_targets_done = len(completed_categories) >= len(DISCOVERY_TARGET_CATEGORIES)
             for link in discover_links(snapshot["dom_after"], url, allowed_hosts):
+                if len(link) > MAX_DISCOVERED_URL_LENGTH:
+                    continue
                 if link in visited or link in priority_queue or link in other_queue:
                     continue
                 try:

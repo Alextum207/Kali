@@ -187,6 +187,42 @@ async def test_decide_next_interaction_returns_none_on_llm_failure():
     assert result is None
 
 
+@pytest.mark.asyncio
+async def test_decide_next_interaction_handles_markdown_fenced_json():
+    # Confirmed live against temu.com: the model sometimes answers with the
+    # JSON wrapped in a Markdown code fence despite the prompt's explicit
+    # "AUSSCHLIESSLICH ein JSON-Objekt" instruction. Before strip_json_fence,
+    # this made json.loads raise on every such response, silently turning
+    # into "no interaction" (see decide_next_interaction's comment).
+    client = _FakeClient('```json\n{"type": "click", "target": "button#add-to-cart"}\n```')
+    result = await decide_next_interaction("product_category", CLICKABLE_ELEMENTS, llm_client=client)
+    assert result == {"type": "click", "target": "button#add-to-cart"}
+
+
+@pytest.mark.asyncio
+async def test_decide_next_interaction_requests_enough_max_tokens_for_the_model_to_think():
+    # Confirmed live against temu.com: max_tokens=200 let the model's
+    # internal reasoning consume the whole budget before emitting any text
+    # block, so extract_text() got "" and json.loads("") raised — silently
+    # turning into "no interaction, ever" for every category on every page
+    # (see decide_next_interaction's comment). Regression guard against
+    # that value quietly shrinking back down.
+    calls = []
+
+    class _SpyMessages:
+        async def create(self, **kwargs):
+            calls.append(kwargs)
+            return _FakeMessage('{"type": "none"}')
+
+    class _SpyClient:
+        def __init__(self):
+            self.messages = _SpyMessages()
+
+    await decide_next_interaction("product_category", CLICKABLE_ELEMENTS, llm_client=_SpyClient())
+
+    assert calls and calls[0]["max_tokens"] >= 1024
+
+
 # --- L: <main>/<article>-preferred truncation window for category classification ---
 
 from app.site_crawler import _llm_classify_category
@@ -267,7 +303,7 @@ def test_sort_by_interaction_keywords_is_stable_for_non_matches():
 import pathlib
 from playwright.async_api import async_playwright
 from app.crawler import CaptchaRequiredError
-from app.site_crawler import crawl_site
+from app.site_crawler import _check_infinite_scroll, crawl_site
 
 CAPTCHA_START_URL = pathlib.Path(__file__).parent.joinpath(
     "fixtures/site_captcha_start/index.html"
@@ -291,6 +327,67 @@ async def test_crawl_site_raises_when_start_page_looks_like_captcha(tmp_path):
             await browser.close()
 
     assert exc_info.value.url == CAPTCHA_START_URL
+
+
+@pytest.mark.asyncio
+async def test_check_infinite_scroll_detects_repeated_growth_without_page_end():
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        page = await browser.new_page(viewport={"width": 900, "height": 700})
+        await page.set_content("""
+            <html><body>
+            <main id="feed">
+              <section style="height:1200px">Feed start</section>
+            </main>
+            <script>
+              let added = 0;
+              window.addEventListener('scroll', () => {
+                if (added >= 4) return;
+                const item = document.createElement('section');
+                item.style.height = '900px';
+                item.textContent = 'More feed item ' + added;
+                document.querySelector('#feed').appendChild(item);
+                added += 1;
+              });
+            </script>
+            </body></html>
+        """)
+        try:
+            assert await _check_infinite_scroll(page) is True
+        finally:
+            await browser.close()
+
+
+@pytest.mark.asyncio
+async def test_check_infinite_scroll_ignores_visible_page_end_indicator():
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        page = await browser.new_page(viewport={"width": 900, "height": 700})
+        await page.set_content("""
+            <html><body>
+            <main id="feed">
+              <section style="height:1200px">Product grid</section>
+            </main>
+            <footer style="position:fixed;left:0;right:0;bottom:0;height:80px;background:white">
+              Zurück zum Seitenanfang
+            </footer>
+            <script>
+              let added = 0;
+              window.addEventListener('scroll', () => {
+                if (added >= 4) return;
+                const item = document.createElement('section');
+                item.style.height = '900px';
+                item.textContent = 'Lazy content ' + added;
+                document.querySelector('#feed').appendChild(item);
+                added += 1;
+              });
+            </script>
+            </body></html>
+        """)
+        try:
+            assert await _check_infinite_scroll(page) is False
+        finally:
+            await browser.close()
 
 
 @pytest.mark.asyncio
@@ -365,6 +462,37 @@ async def test_crawl_site_skips_robots_disallowed_discovered_links(tmp_path, mon
 
 
 @pytest.mark.asyncio
+async def test_crawl_site_skips_pathologically_long_discovered_links(tmp_path, monkeypatch):
+    """A self-referencing redirect param (e.g. Amazon's preferencesReturnUrl,
+    which re-encodes the current URL into itself on every hop) produces a
+    discovered link that grows longer each time it's visited — `visited`
+    dedupe by exact string never catches it, so it would otherwise burn the
+    whole max_pages budget on the same effective page. See
+    MAX_DISCOVERED_URL_LENGTH in app/site_crawler.py."""
+    normal_link = TWO_PAGE_SITE_URL.replace("index.html", "page2.html")
+    pathological_link = TWO_PAGE_SITE_URL.replace(
+        "index.html", "page2.html?loop=" + "a" * 600
+    )
+
+    def fake_discover_links(dom_html, base_url, allowed_hosts):
+        return [normal_link, pathological_link]
+
+    monkeypatch.setattr("app.site_crawler.discover_links", fake_discover_links)
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        result = await crawl_site(
+            TWO_PAGE_SITE_URL, browser, max_pages=5, har_dir=str(tmp_path),
+            url_validator=lambda url: None,  # file:// fixtures aren't http(s); bypass SSRF check for this local test
+        )
+        await browser.close()
+
+    urls = {p["url"] for p in result["pages"]}
+    assert normal_link in urls
+    assert pathological_link not in urls
+
+
+@pytest.mark.asyncio
 async def test_crawl_site_follows_same_directory_links_up_to_max_pages(tmp_path):
     async with async_playwright() as p:
         browser = await p.chromium.launch()
@@ -432,10 +560,11 @@ async def test_crawl_site_respects_max_pages_limit(tmp_path):
 
 @pytest.mark.asyncio
 async def test_crawl_site_passes_nav_timeout_to_goto(tmp_path, monkeypatch):
-    # Playwright's own default navigation timeout (30s) is longer than the
-    # crawl's own SCAN_TIME_BUDGET_SECONDS default (25s) — crawl_site must
-    # bound page.goto with the explicit NAV_TIMEOUT_MS constant instead of
-    # falling back to Playwright's default.
+    # Playwright's own default navigation timeout (30s) is longer than a
+    # page's share of the crawl's own scan time budget (25s default per
+    # page) — crawl_site must bound page.goto with the explicit
+    # NAV_TIMEOUT_MS constant instead of falling back to Playwright's
+    # default.
     from playwright.async_api import Page
 
     from app.crawler import NAV_TIMEOUT_MS
@@ -475,6 +604,29 @@ async def test_crawl_site_stops_discovering_when_time_budget_exceeded(tmp_path):
         await browser.close()
 
     assert len(result["pages"]) == 1  # only the start page — budget exhausted before discovering more
+
+
+@pytest.mark.asyncio
+async def test_crawl_site_default_time_budget_scales_with_max_pages(tmp_path, monkeypatch):
+    # No explicit time_budget_seconds and no SCAN_TIME_BUDGET_SECONDS
+    # override — the default must come from max_pages *
+    # SCAN_SECONDS_PER_PAGE_BUDGET, not a fixed value. A tiny per-page
+    # budget makes the effective total budget tiny too, so the crawl stops
+    # discovering after the start page — same signal as
+    # test_crawl_site_stops_discovering_when_time_budget_exceeded, but here
+    # it proves the *default* scales instead of using an explicit override.
+    monkeypatch.delenv("SCAN_TIME_BUDGET_SECONDS", raising=False)
+    monkeypatch.setattr("app.site_crawler.SCAN_SECONDS_PER_PAGE_BUDGET", 0.05)  # * max_pages=20 -> 1.0s total, same value known to work in test_crawl_site_stops_discovering_when_time_budget_exceeded
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        result = await crawl_site(
+            TWO_PAGE_SITE_URL, browser, max_pages=20, har_dir=str(tmp_path),
+            url_validator=lambda url: None,
+        )
+        await browser.close()
+
+    assert len(result["pages"]) == 1  # only the start page — tiny default budget exhausted before discovering more
 
 
 @pytest.mark.asyncio
@@ -655,3 +807,58 @@ async def test_crawl_site_flow_walk_stops_early_when_time_budget_exhausted(tmp_p
         await browser.close()
 
     assert len(result["pages"]) == 1  # only the start page — no flow step got to run
+
+
+# --- Discovery muss weiterlaufen, bis auch popup_leadform gefunden ist ---
+
+POPUP_DISCOVERY_SITE_URL = pathlib.Path(__file__).parent.joinpath(
+    "fixtures/site_popup_discovery/index.html"
+).as_uri()
+
+
+class _PopupOnlyClassifyClient:
+    """Klassifiziert nur eine Seite, deren Inhalt "Gewinnspiel" enthält, als
+    popup_leadform (alles andere ohne Keyword-Match fällt auf "other"
+    zurück); schlägt nie eine Interaktion vor (decide_next_interaction-
+    Prompts, erkennbar am festen Antwortformat-Substring, bekommen immer
+    {"type": "none"}) — hält den Flow-Walk pro Seite auf einen Schritt,
+    Fokus bleibt auf der Discovery-Logik."""
+
+    class _Messages:
+        def __init__(self, outer):
+            self._outer = outer
+
+        async def create(self, **kwargs):
+            prompt = kwargs["messages"][0]["content"]
+            if "AUSSCHLIESSLICH mit einem JSON-Objekt" in prompt:
+                return _FakeMessage('{"type": "none"}')
+            if "Gewinnspiel" in prompt:
+                return _FakeMessage("popup_leadform")
+            return _FakeMessage("other")
+
+    def __init__(self):
+        self.messages = self._Messages(self)
+
+
+@pytest.mark.asyncio
+async def test_crawl_site_keeps_discovering_popup_leadform_after_targets_done(tmp_path):
+    # index.html links to checkout/product/account (in that order) — the
+    # LIFO priority_queue visits them in reverse (account, product,
+    # checkout), so checkout/start.html is the page that completes all 3
+    # TARGET_CATEGORIES. Its own link to ../promo.html is discovered right
+    # after that happens: without DISCOVERY_TARGET_CATEGORIES including
+    # popup_leadform, that link would be dropped as soon as all_targets_done
+    # flips true, and promo.html (the only popup_leadform-classified page)
+    # would never be visited.
+    client = _PopupOnlyClassifyClient()
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        result = await crawl_site(
+            POPUP_DISCOVERY_SITE_URL, browser, max_pages=10, har_dir=str(tmp_path),
+            llm_client=client, url_validator=lambda url: None,
+        )
+        await browser.close()
+
+    pages_by_category = {p["category"]: p["url"] for p in result["pages"]}
+    assert "popup_leadform" in pages_by_category
+    assert "promo.html" in pages_by_category["popup_leadform"]

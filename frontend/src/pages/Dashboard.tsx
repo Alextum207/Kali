@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   ArrowLeft,
@@ -26,6 +26,7 @@ import {
 import FireflyBadge from "@/components/FireflyBadge";
 import logo from "@/assets/kali-firefly-logo.png";
 import hotelRoom from "@/assets/hotel-room.jpg";
+import { getScans, type Scan } from "@/lib/api";
 
 type Priority = "high" | "medium" | "low";
 type Status = "New" | "In review" | "Assigned" | "Watching";
@@ -107,15 +108,25 @@ const legalDetails: Record<string, { label: string; match: string }[]> = {
 
 const matchLabels = ["Strong match", "Context dependent", "Possible"];
 
-const cases: CaseItem[] = [
-  { id: "travelnow", company: "TravelNow", site: "travelnow.com", score: 8.7, priority: "high", pattern: "False Scarcity", legal: ["§ 5 UWG", "DSA Art. 25"], evidence: 6, status: "New", updated: "May 18, 2026" },
-  { id: "shoplux", company: "ShopLux", site: "shoplux.com", score: 8.2, priority: "high", pattern: "Hidden Costs", legal: ["§ 5 UWG"], evidence: 4, status: "In review", updated: "May 18, 2026" },
-  { id: "streamit", company: "StreamIt", site: "streamit.com", score: 7.5, priority: "medium", pattern: "Hard to Cancel", legal: ["§ 5 UWG", "DSA Art. 25"], evidence: 8, status: "Assigned", updated: "May 17, 2026" },
-  { id: "buymore", company: "BuyMore", site: "buymore.de", score: 6.1, priority: "medium", pattern: "Preselection", legal: ["DSGVO Art. 7", "§ 5 UWG"], evidence: 3, status: "Watching", updated: "May 17, 2026" },
-  { id: "fitpro", company: "FitPro", site: "fitpro.com", score: 5.6, priority: "medium", pattern: "Drip Pricing", legal: ["§ 5 UWG"], evidence: 5, status: "New", updated: "May 16, 2026" },
-  { id: "cloudplus", company: "CloudPlus", site: "cloudplus.com", score: 4.8, priority: "low", pattern: "Hidden Costs", legal: ["§ 5 UWG"], evidence: 3, status: "Watching", updated: "May 16, 2026" },
-  { id: "musicday", company: "MusicDay", site: "musicday.com", score: 4.2, priority: "low", pattern: "Preselection", legal: ["DSGVO Art. 7"], evidence: 2, status: "Watching", updated: "May 15, 2026" },
-];
+function scansToCases(scans: Scan[]): CaseItem[] {
+  return scans.map((s) => {
+    const hostname = new URL(s.url).hostname;
+    const entries = Object.entries(s.risk.by_category);
+    const topPattern = entries.sort((a, b) => b[1] - a[1])[0]?.[0] ?? "—";
+    return {
+      id: String(s.id),
+      company: hostname,
+      site: hostname,
+      score: s.risk.score * 10, // Risk.score is 0.0-1.0, see api.ts
+      priority: s.risk.level === "hoch" ? "high" : s.risk.level === "mittel" ? "medium" : "low",
+      pattern: topPattern,
+      legal: [],
+      evidence: entries.reduce((n, [, c]) => n + c, 0),
+      status: s.status === "done" ? "Watching" : "New",
+      updated: new Date(s.finished_at ?? s.started_at).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }),
+    };
+  });
+}
 
 const statusStyles: Record<Status, string> = {
   New: "bg-sky-100 text-sky-700",
@@ -406,8 +417,24 @@ const CaseDetail = ({
 };
 
 const Dashboard = () => {
-  const [selectedId, setSelectedId] = useState("travelnow");
+  const [scans, setScans] = useState<Scan[]>([]);
+  const [status, setStatus] = useState<"loading" | "done" | "error">("loading");
+  const [error, setError] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState("");
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
+
+  useEffect(() => {
+    getScans()
+      .then((s) => { setScans(s); setStatus("done"); })
+      .catch((err) => { setError((err as Error).message); setStatus("error"); });
+  }, []);
+
+  const cases = scansToCases(scans);
+
+  useEffect(() => {
+    if (!selectedId && cases.length > 0) setSelectedId(cases[0].id);
+  }, [cases, selectedId]);
+
   const selectedIndex = cases.findIndex((c) => c.id === selectedId);
   const selected = cases[selectedIndex] ?? cases[0];
 
@@ -471,6 +498,12 @@ const Dashboard = () => {
           <div className={`flex-1 min-w-0 px-5 md:px-8 py-6 ${mobileDetailOpen ? "hidden xl:block" : ""}`}>
             <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Cases</h1>
             <p className="text-sm text-muted-foreground mt-1 mb-6">Investigation queue</p>
+
+            {status === "loading" && <p className="text-sm text-muted-foreground mb-6">Loading scans…</p>}
+            {status === "error" && <p className="text-sm text-red-600 mb-6">Failed to load scans: {error}</p>}
+            {status === "done" && cases.length === 0 && (
+              <p className="text-sm text-muted-foreground mb-6">No scans yet. Start one from the case analysis page.</p>
+            )}
 
             {/* Filters */}
             <div className="flex flex-wrap items-center gap-2 mb-6">
@@ -600,6 +633,7 @@ const Dashboard = () => {
               mobileDetailOpen ? "block" : "hidden"
             } xl:block w-full xl:w-[600px] xl:shrink-0 border-l border-border bg-background/60`}
           >
+            {selected && (
             <CaseDetail
               item={selected}
               onBack={() => setMobileDetailOpen(false)}
@@ -608,6 +642,7 @@ const Dashboard = () => {
               canPrev={selectedIndex > 0}
               canNext={selectedIndex < cases.length - 1}
             />
+            )}
           </div>
         </div>
       </div>

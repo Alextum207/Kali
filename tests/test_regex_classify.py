@@ -26,6 +26,18 @@ def test_fake_urgency_does_not_match_plain_opening_hours():
     assert not any(f["pattern_type"] == "Fake Urgency" for f in findings)
 
 
+def test_fake_urgency_does_not_match_product_specs_with_unit_letters():
+    """Regression from a live Temu smoke test: arbitrary 1-3 letter units
+    made static specs like "42A 65W" look like a two-part countdown."""
+    findings = find_regex_patterns("USB-C Ladegerät 42A 65W Schnellladen")
+    assert not any(f["pattern_type"] == "Fake Urgency" for f in findings)
+
+
+def test_fake_urgency_does_not_match_compact_hash_like_tokens():
+    findings = find_regex_patterns("Release files include hash 98d6d for verification.")
+    assert not any(f["pattern_type"] == "Fake Urgency" for f in findings)
+
+
 def test_finds_fake_scarcity_en():
     findings = find_regex_patterns("Only 3 items available, order now.")
     assert any(f["pattern_type"] == "Fake Scarcity" for f in findings)
@@ -94,4 +106,14 @@ def test_scarcity_does_not_match_unrelated_rating_count_and_seller_line():
 
 def test_finds_fake_scarcity_de_verkauft_phrase_still_works():
     findings = find_regex_patterns("Nur noch 5 Stück verkauft, schnell zugreifen.")
+    assert any(f["pattern_type"] == "Fake Scarcity" for f in findings)
+
+
+def test_finds_fake_scarcity_de_with_thousands_abbreviation():
+    """Regression: a "14 Tsd. verkauft" (14K sold) badge — the "Tsd."
+    magnitude abbreviation between the number and "verkauft" fell outside
+    the old regex's optional-unit group, so real scarcity badges using this
+    common German thousands shorthand went undetected. Real bug report from
+    a live Amazon listing page (mistakes/scarcity nicht alles erkannt.png)."""
+    findings = find_regex_patterns("3,73€ 14 Tsd. verkauft")
     assert any(f["pattern_type"] == "Fake Scarcity" for f in findings)

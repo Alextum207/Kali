@@ -46,3 +46,18 @@ def test_highlight_quote_in_screenshot_returns_none_for_empty_boxes():
     screenshot = _make_png()
     result = highlight_quote_in_screenshot(screenshot, "9,99 Euro ab dem 2. Monat", [])
     assert result is None
+
+
+def test_highlight_quote_in_screenshot_crops_to_zoomed_region():
+    # Full-page screenshots can be much taller than the viewport (Kali uses
+    # full_page=True) — the result must be cropped down around the matched
+    # box, not the whole original image, or the highlight is effectively
+    # invisible.
+    screenshot = _make_png(width=1280, height=6000)
+    boxes = [{"text": "9,99 Euro ab dem 2. Monat", "x": 20, "y": 5000, "width": 200, "height": 30}]
+    result = highlight_quote_in_screenshot(screenshot, "9,99 Euro ab dem 2. Monat", boxes)
+
+    assert result is not None
+    img = Image.open(io.BytesIO(result))
+    assert img.height < 6000
+    assert img.width < 1280
