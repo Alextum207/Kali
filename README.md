@@ -71,42 +71,95 @@ pytest -q
 
 ## Demo-Anleitung für die Jury
 
-**Primärer, netzwerkunabhängiger Demo-Pfad** (kein Internet nötig, garantiert
-reproduzierbar):
+Es gibt zwei Wege, Kali auszuprobieren: **lokal** (empfohlen) und **online**
+über die deployte Version auf Render. Beide zeigen dieselbe Anwendung —
+lokal ist zuverlässiger und wird deshalb hier zuerst beschrieben.
 
-1. `uvicorn app.main:app --reload` starten, Dashboard unter
-   http://127.0.0.1:8000/ öffnen.
-2. Als Start-URL den `file://`-Pfad zu `tests/fixtures/fake_shop/index.html`
-   eingeben (absoluter Pfad auf dem Vorführ-Rechner).
-3. Scan starten — die Seite aktualisiert sich automatisch, während der
-   Crawler `index.html` → `product.html` → `cart.html` → `checkout.html` →
-   `account.html` durchläuft.
-4. Ergebnis: garantiert mindestens 4 deterministische Funde (Fake Urgency,
-   Trick Questions, Visuelle Tarnung, Fehlende Reject-Option/Cookie-Banner —
-   siehe `tests/test_demo_flow.py`), plus bei aktivem `ANTHROPIC_API_KEY`
-   zusätzlich Confirm Shaming und Sneaking/Hidden Costs.
-5. "PDF-Report herunterladen" klicken — funktioniert mit oder ohne
-   funktionierende WeasyPrint/GTK-Installation (siehe oben).
+### Weg A: Lokal (empfohlen)
 
-**Zusatz-Demo (optional, braucht Internet):** eine echte externe Website
-scannen, um den Site-Crawl mit Kategorie-Priorisierung und den Flow-Walk
-(z.B. bis zum Checkout durchklicken) live zu zeigen.
+**Warum lokal statt online?** Bei einem Testlauf während der Entwicklung
+lieferte derselbe Scan derselben echten Website online (Render) und lokal
+unterschiedliche Ergebnisse — die Ursache dafür ist nicht abschließend
+geklärt. Der lokale Pfad ist der einzige, dessen Verhalten vollständig
+nachvollzogen und verifiziert wurde. Zusätzlich kann eine kostenlose
+Render-Instanz nach Inaktivität eine Weile zum Aufwachen brauchen
+("Cold Start") und läuft möglicherweise nicht auf dem allerneuesten
+Code-Stand, falls kurz vor der Vorführung noch etwas geändert wurde.
 
-**Extension:** `chrome://extensions` → Entwicklermodus → "Entpackt laden" →
-`vendor/pattern-highlighter/chrome/` auswählen. Dann `fake_shop/index.html`
-im Browser öffnen (lokale Datei), Popup zeigt Live-Funde inkl. Cookie-Wall-
-Umrandung, "PDF-Report erstellen" öffnet die Druckansicht mit
-Screenshot-Thumbnails.
+**Voraussetzungen:** Python 3.11+, Node.js 18+, ein Terminal (auf Windows:
+"PowerShell" oder "Eingabeaufforderung", auf Mac: "Terminal"-App).
+
+**Schritt für Schritt:**
+
+1. Terminal öffnen, in den Projektordner wechseln (der Ordner, der diese
+   README.md enthält):
+   ```bash
+   cd Kali
+   ```
+2. Backend-Abhängigkeiten installieren (einmalig, kann ein paar Minuten
+   dauern):
+   ```bash
+   pip install -r requirements.txt
+   playwright install chromium
+   ```
+3. `.env`-Datei anlegen: die Datei `.env.example` kopieren, in `.env`
+   umbenennen, und darin `ANTHROPIC_API_KEY` mit einem echten Anthropic-
+   API-Key befüllen (ohne diesen Key laufen die KI-gestützten Erkennungen
+   nicht, der Rest der Anwendung funktioniert trotzdem).
+4. Backend starten:
+   ```bash
+   uvicorn app.main:app --reload
+   ```
+   Terminal-Fenster offen lassen, solange die Anwendung läuft.
+5. Browser öffnen, zu `http://127.0.0.1:8000/` navigieren. Das ist das
+   Kali-Dashboard.
+6. Eine echte, öffentlich erreichbare Website-Adresse eingeben (z.B. eine
+   echte Online-Shop-URL mit `https://` davor — **keine** `file://`-Pfade
+   und **keine** `localhost`/`127.0.0.1`-Adressen, die blockt Kali aus
+   Sicherheitsgründen bewusst) und den Scan starten.
+7. Die Seite aktualisiert sich automatisch, während Kali die Website
+   durchsucht. Nach Abschluss erscheinen die gefundenen Dark Patterns mit
+   Rechtsnorm-Zuordnung.
+8. "PDF-Report herunterladen" klicken, um den gerichtsfesten Bericht zu
+   erzeugen (funktioniert auch ohne WeasyPrint/GTK-Installation — die
+   Anwendung zeigt dann automatisch eine HTML-Ansicht desselben Berichts
+   statt eines Fehlers).
+
+**Browser-Erweiterung (optional, zusätzlich zum Backend):**
+`chrome://extensions` in Chrome öffnen → oben rechts "Entwicklermodus"
+aktivieren → "Entpackte Erweiterung laden" klicken → den Ordner
+`vendor/pattern-highlighter/chrome/` auswählen. Danach zeigt das
+Erweiterungs-Icon auf jeder besuchten Website live erkannte Dark Patterns
+an, unabhängig vom Backend.
+
+### Weg B: Online (Render)
+
+Die deployte Version läuft unter der im Repo hinterlegten Render-URL (siehe
+`render.yaml`). Funktioniert genauso wie Weg A, Schritte 5–8 — nur ohne
+eigene Installation. Ein "Cold Start" von bis zu ~30 Sekunden beim ersten
+Aufruf nach längerer Inaktivität ist normal (kostenlose Render-Instanz).
+
+### Frontend (optional, React/Vite statt der eingebauten Oberfläche)
+
+```bash
+cd frontend
+npm i
+cp .env.example .env
+npm run dev
+```
+Dann `http://localhost:8080/` öffnen, bei laufendem Backend (Schritt 4
+oben, Weg A) parallel im Hintergrund.
 
 ## Architektur & Sicherheit
 
 - **Strikte Trennung**: Crawler (`app/crawler.py`, `app/site_crawler.py`),
   Erkennungs-Engine (`app/analysis/`), Datenhaltung (`app/db.py`), Reporting
   (`app/reports.py`) sind unabhängige Module ohne Zirkelabhängigkeiten.
-- **SSRF-Schutz** (`app/url_safety.py::validate_scan_url`): blockt private/
-  Loopback-/Link-lokale IPs, Cloud-Metadata-Adressen und `file://`
-  außerhalb kontrollierter Test-Fixtures, bevor irgendeine URL an Playwright
-  geht. Gilt für die Start-URL und jeden vom Crawler entdeckten Link.
+- **SSRF-Schutz** (`app/url_safety.py::validate_scan_url`): erlaubt nur
+  `http`/`https` (`file://` wird ausnahmslos abgelehnt, für jede URL) und
+  blockt private/Loopback-/Link-lokale IPs sowie Cloud-Metadata-Adressen,
+  bevor irgendeine URL an Playwright geht. Gilt für die Start-URL und jeden
+  vom Crawler entdeckten Link.
 - **CAPTCHA-Abbruch** (`CaptchaRequiredError`): ein erkanntes CAPTCHA auf
   der Start-Seite bricht den Scan sauber ab (`status='error'` im UI) statt
   es zu umgehen oder falsche Ergebnisse zu erzeugen.
