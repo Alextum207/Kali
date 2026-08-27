@@ -601,7 +601,7 @@ const Dashboard = () => {
 
             {/* Pagination */}
             <div className="flex items-center justify-between mt-6 text-sm text-muted-foreground">
-              <span className="text-xs">1–7 of 73 cases</span>
+              <span className="text-xs">{cases.length} cases</span>
               <div className="flex items-center gap-1">
                 <button className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-secondary transition-colors">
                   <ChevronLeft className="w-4 h-4" />
