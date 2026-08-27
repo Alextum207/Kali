@@ -185,6 +185,18 @@
     "message": "Das Cookie-Banner bietet keine gleichwertige Möglichkeit, alle nicht notwendigen Cookies mit einem Klick abzulehnen.",
     "description": "Kurze Erklärung des Fehlende-Reject-Option Pattern."
   },
+  "patternSneakingIntoBasket_name": {
+    "message": "Sneaking into Basket",
+    "description": "Name des Sneaking-into-Basket Pattern."
+  },
+  "patternSneakingIntoBasket_infoUrl": {
+    "message": "https://www.verbraucherzentrale.de/wissen/digitale-welt/onlinedienste/dark-patterns-so-wollen-websites-und-apps-sie-manipulieren-58082",
+    "description": "URL zur Erklärung des Sneaking-into-Basket Pattern auf der Verbraucherzentrale-Webseite."
+  },
+  "patternSneakingIntoBasket_info": {
+    "message": "Im Checkout liegen mehr Artikel im Warenkorb, als Sie ausgewählt haben: Der Shop hat zusätzliche Artikel oder Zusatzoptionen ohne Ihre ausdrückliche Zustimmung in den Warenkorb gelegt.",
+    "description": "Kurze Erklärung des Sneaking-into-Basket Pattern."
+  },
   "showPatternState": {
     "message": "$CURRENT$ von $TOTAL$",
     "description": "Anzeige der Nummer des aktuellen Patterns im Popup für die Funktion 'Pattern ansehen'.",

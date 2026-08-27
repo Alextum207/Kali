@@ -593,14 +593,25 @@ function findPatterInNode(node, nodeOld) {
 }
 
 function markDetectedElement(elem, pattern) {
+    // Tracking classes are always applied — the popup's counts (see
+    // getPatternsResults) rely on finding ALL matched elements and bucket
+    // them into visible/hidden itself. But the on-page UI (debug border,
+    // explain icon) must only appear for the pattern that's actually on
+    // screen right now: some pages (e.g. a multi-step card/carousel widget)
+    // keep later steps' elements in the DOM ahead of time, hidden until
+    // their turn — showing our icon/border on those would spoil/misplace
+    // itself for a step that isn't "dran" yet.
     elem.classList.add(
         constants.patternDetectedClassName,
         constants.extensionClassPrefix + pattern.className
     );
+    elem.title = pattern.info;
+    if (!elementIsVisible(elem)) {
+        return;
+    }
     if (constants.SHOW_DEBUG_BOXES) {
         elem.classList.add(constants.debugBoxClassName);
     }
-    elem.title = pattern.info;
     addExplainIcon(elem, pattern);
 }
 
