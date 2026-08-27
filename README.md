@@ -22,7 +22,16 @@ playwright install chromium   # mandatory — crawling fails with a confusing er
 
 ## `.env`
 
-Copy `.env.example` to `.env` and fill in `ANTHROPIC_API_KEY`. `LEGAL_TEXT_MCP_BASE_URL`
+Create a `.env` file in the project root with the following content:
+
+```
+ANTHROPIC_API_KEY=
+LEGAL_TEXT_MCP_BASE_URL=http://localhost:8091
+DB_PATH=./data/monitor.db
+EVIDENCE_DIR=./data/evidence
+```
+
+Fill in `ANTHROPIC_API_KEY` with your actual Anthropic API key. `LEGAL_TEXT_MCP_BASE_URL`
 expects a separately running `legal-text-mcp-de` server (see `app/compliance.py`
 for the endpoint it calls):
 
@@ -102,10 +111,17 @@ Code-Stand, falls kurz vor der Vorführung noch etwas geändert wurde.
    pip install -r requirements.txt
    playwright install chromium
    ```
-3. `.env`-Datei anlegen: die Datei `.env.example` kopieren, in `.env`
-   umbenennen, und darin `ANTHROPIC_API_KEY` mit einem echten Anthropic-
-   API-Key befüllen (ohne diesen Key laufen die KI-gestützten Erkennungen
-   nicht, der Rest der Anwendung funktioniert trotzdem).
+3. `.env`-Datei anlegen: eine Textdatei namens `.env` im Projektordner erstellen
+   und folgende Zeilen hinzufügen:
+   ```
+   ANTHROPIC_API_KEY=
+   LEGAL_TEXT_MCP_BASE_URL=http://localhost:8091
+   DB_PATH=./data/monitor.db
+   EVIDENCE_DIR=./data/evidence
+   ```
+   Dabei `ANTHROPIC_API_KEY=` mit einem echten Anthropic-API-Key ergänzen (ohne
+   diesen Key laufen die KI-gestützten Erkennungen nicht, der Rest der Anwendung
+   funktioniert trotzdem).
 4. Backend starten:
    ```bash
    uvicorn app.main:app --reload
