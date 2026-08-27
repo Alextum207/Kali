@@ -224,7 +224,19 @@ def test_timeout_constants_derive_from_page_budget(monkeypatch):
     finally:
         # Restore default-env-derived values so later tests in this module
         # (which reference these constants directly) see the normal 25s-budget
-        # defaults again.
+        # defaults again. monkeypatch.setenv's own revert only runs at fixture
+        # teardown, AFTER this function (including this finally block) has
+        # already returned — so reloading here while the "60" override is
+        # still active just reloads the SAME 60s-derived values again,
+        # permanently. That silent no-op left crawler_module.NAV_TIMEOUT_MS
+        # stuck at the 60s value for the rest of the test session, which
+        # test_site_crawler.py::test_crawl_site_passes_nav_timeout_to_goto
+        # then failed against (it imports NAV_TIMEOUT_MS fresh, so it saw the
+        # stuck 60s value, while the actual crawl — which imported the
+        # constant into app.site_crawler at module load, long before this
+        # test ever ran — kept using the real 25s-budget value). Explicitly
+        # undo the env override before reloading so this really restores it.
+        monkeypatch.delenv("SCAN_SECONDS_PER_PAGE_BUDGET", raising=False)
         importlib.reload(crawler_module)
 
 

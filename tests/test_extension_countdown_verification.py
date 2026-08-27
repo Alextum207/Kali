@@ -161,6 +161,18 @@ async def _run_extension_page(origin: str, kind: str) -> int:
                     setTimeout(() => callback({ success: true }), 0);
                   }
                   return Promise.resolve({ success: true });
+                },
+                // content.js registers `brw.runtime.onMessage.addListener(...)`
+                // synchronously at top-level script evaluation (for the
+                // popup's live getPatternCount/showElement/setActivation
+                // requests) — without this stub, that call throws
+                // "Cannot read properties of undefined (reading
+                // 'addListener')" immediately, aborting the whole script
+                // before initPatternHighlighter() ever runs, which is why
+                // window.__kaliLastResults never got set. No-op is enough:
+                // this test never sends those messages itself.
+                onMessage: {
+                  addListener: () => {}
                 }
               }
             };
